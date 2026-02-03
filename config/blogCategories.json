@@ -1,0 +1,66 @@
+{
+  "Web Development": [
+    "Frontend Development",
+    "Backend Development",
+    "Full Stack Development",
+    "WordPress Development",
+    "E-commerce Development"
+  ],
+  "Mobile Development": [
+    "iOS Development",
+    "Android Development",
+    "React Native",
+    "Flutter Development",
+    "Cross-platform Apps"
+  ],
+  "Machine Learning & AI": [
+    "Supervised Learning",
+    "Unsupervised Learning",
+    "Deep Learning",
+    "Natural Language Processing (NLP)",
+    "Computer Vision"
+  ],
+  "Premium Tech Services": [
+    "React.js",
+    "MERN Stack",
+    "Next.js",
+    "WordPress",
+    "Shopify",
+    "Firebase",
+    "Tailwind CSS",
+    "React Native",
+    "Flutter",
+    "Android (Kotlin)",
+    "iOS (Swift)",
+    "Java",
+    "GraphQL",
+    "Python AI",
+    "TensorFlow",
+    "OpenAI API",
+    "PyTorch",
+    "Data Science",
+    "Computer Vision"
+  ],
+  "Freelancing Success": [
+    "Profile Optimization",
+    "Winning Proposals",
+    "Pricing Strategies",
+    "Client Communication",
+    "Time Management",
+    "Building a Portfolio"
+  ],
+  "Client Guides": [
+    "Hiring Top Talent",
+    "Writing Effective Job Posts",
+    "Project Management Tips",
+    "Managing Remote Teams",
+    "Safe Payments & Security"
+  ],
+  "Fworkk Platform": [
+    "Getting Started on Fworkk",
+    "Platform Features & Tools",
+    "Success Stories",
+    "Community Guidelines",
+    "Safety & Trust"
+  ]
+}

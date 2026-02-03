@@ -1,0 +1,5 @@
+[
+  { "id": "template-react", "name": "React Basic (Vite)", "path": "./templates/template-react", "type": "react" },
+  { "id": "template-html", "name": "HTML Portfolio", "path": "./templates/template-html", "type": "html" },
+  { "id": "next-template", "name": "Next Starter", "path": "./templates/next-template", "type": "next" }
+]

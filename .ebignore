@@ -1,0 +1,8 @@
+node_modules
+.env
+logs
+uploads
+temp_check
+temp_zip_check
+server.zip
+package-lock.json
