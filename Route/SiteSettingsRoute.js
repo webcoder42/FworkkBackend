@@ -10,7 +10,7 @@ import { cacheMiddleware } from "../middleware/cacheMiddleware.js";
 const router = express.Router();
 
 // GET site settings
-router.get("/", cacheMiddleware("siteSettings" , 86400), getSiteSettings);
+router.get("/", cacheMiddleware(86400, "siteSettings"), getSiteSettings);
 
 router.put(
   "/",

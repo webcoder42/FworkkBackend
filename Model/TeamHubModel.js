@@ -77,11 +77,23 @@ const teamHubSchema = new Schema(
           required: true,
           trim: true,
         },
+        messageType: {
+          type: String,
+          enum: ["text", "image", "file", "system"],
+          default: "text",
+        },
+        fileUrl: String,
+        fileName: String,
+        fileSize: Number,
         timestamp: {
           type: Date,
           default: Date.now,
         },
         isAdmin: {
+          type: Boolean,
+          default: false,
+        },
+        isSystemMessage: {
           type: Boolean,
           default: false,
         },
@@ -176,6 +188,19 @@ const teamHubSchema = new Schema(
     planId: {
       type: Schema.Types.ObjectId,
       ref: "PlanPurchase",
+    },
+    activeCallId: {
+      type: String,
+      default: null,
+    },
+    callStartedAt: {
+      type: Date,
+      default: null,
+    },
+    callStartedBy: {
+        type: Schema.Types.ObjectId,
+        ref: "users",
+        default: null,
     },
   },
   {

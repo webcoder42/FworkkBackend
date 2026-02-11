@@ -242,6 +242,36 @@ const ProjectRequestSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
+    activeCallId: {
+        type: String,
+        default: null,
+    },
+    callStartedAt: {
+        type: Date,
+        default: null,
+    },
+    callStartedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "users",
+        default: null,
+    },
+    callJoinRequests: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "users",
+        },
+        requestedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        status: {
+          type: String,
+          enum: ["pending", "approved", "denied"],
+          default: "pending",
+        },
+      },
+    ],
     updatedAt: {
         type: Date,
         default: Date.now

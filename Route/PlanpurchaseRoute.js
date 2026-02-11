@@ -25,36 +25,56 @@ const router = express.Router();
 
 router.post("/purchase", requireSignIn, createPlanPurchase);
 
-router.get("/check-active-plan",cacheMiddleware('check-active-plan' , 60), requireSignIn, checkActivePlan);
+router.get("/check-active-plan",cacheMiddleware(60, 'check-active-plan'), requireSignIn, checkActivePlan);
 
 router.post("/team-purchase", requireSignIn, teamPlanPurchase);
-router.post("/create-paypal-order", createPayPalOrder);
+router.post("/create-paypal-order", requireSignIn, createPayPalOrder);
 router.get("/braintree/token", generateBraintreeToken);
 
-router.get("/my-plan",cacheMiddleware('my-plan' , 60), requireSignIn, getMyPlan);
+router.get("/my-plan",cacheMiddleware(60, 'my-plan'), requireSignIn, getMyPlan);
 
-router.get("/my-latest-plan",cacheMiddleware('my-latest-plans' , 60), requireSignIn, getLatestPlanForUser);
+router.get("/my-latest-plan",cacheMiddleware(60, 'my-latest-plans'), requireSignIn, getLatestPlanForUser);
 
 router.post("/add-funds", requireSignIn, addFunds);
 router.get("/fund-history", requireSignIn, getFundHistory);
+
+// Debug route for PayPal configuration
+router.get("/paypal-test", requireSignIn, async (req, res) => {
+    try {
+        const { getPayPalAccessToken } = await import("../Controller.js/PlanPurchaseController.js");
+        const result = await getPayPalAccessToken();
+        res.json({ 
+            success: true, 
+            message: "PayPal connection successful", 
+            baseUrl: result.baseUrl 
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            message: "PayPal connection failed", 
+            error: error.message 
+        });
+    }
+});
+
 router.post("/refund-fund/:id", requireSignIn, refundFund);
 router.post("/nowpayments-create", requireSignIn, createNowPaymentsInvoice);
 router.post("/nowpayments-webhook", nowPaymentsWebhook);
 
-router.get("/my-team-plans",cacheMiddleware('my-team-plan' ,60 ), requireSignIn, getMyTeamPlans);
-router.get("/total-purchase-amount",cacheMiddleware('total-purchase-amount' , 60), requireSignIn, getTotalPlanPurchaseAmount);
+router.get("/my-team-plans",cacheMiddleware(60, 'my-team-plan'), requireSignIn, getMyTeamPlans);
+router.get("/total-purchase-amount",cacheMiddleware(60, 'total-purchase-amount'), requireSignIn, getTotalPlanPurchaseAmount);
 router.get(
   "/monthly-purchase-amounts",
-  cacheMiddleware('monthly-purchase-amount' , 60),
+  cacheMiddleware(60, 'monthly-purchase-amount'),
   requireSignIn,
   getMonthlyPlanPurchaseAmounts
 );
 router.get(
   "/alltime-monthly-purchases",
-  cacheMiddleware('alltime-monthly-purchases'),
+  cacheMiddleware(60, 'alltime-monthly-purchases'),
   requireSignIn,
   getAllTimeMonthlyPurchases
 );
-router.get("/all-purchase",cacheMiddleware('all-purchases', 60), requireSignIn, getAllPlanPurchases);
+router.get("/all-purchase",cacheMiddleware(60, 'all-purchases'), requireSignIn, getAllPlanPurchases);
 
 export default router;

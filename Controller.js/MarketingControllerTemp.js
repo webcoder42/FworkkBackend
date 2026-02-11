@@ -1,3 +1,4 @@
+import fetch from "node-fetch";
 import UserModel from "../Model/UserModel.js";
 import { redisClient } from "../server.js";
 import { sendEmail } from "../services/EmailService.js";

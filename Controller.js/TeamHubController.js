@@ -9,6 +9,8 @@ import {
   sendTaskStatusUpdateEmail,
   sendEarningUpdateEmail
 } from "../services/EmailService.js";
+import { uploadImageToCloudinary } from "../services/cloudinaryService.js";
+import { client as streamClient } from "../services/streamToken.js";
 
 // Helper function to check if team plan is expired
 const checkTeamPlanStatus = async (userId) => {
@@ -52,7 +54,6 @@ const checkTeamPlanStatus = async (userId) => {
     };
   }
 };
-import { uploadImageToCloudinary } from "../services/cloudinaryService.js";
 
 export const createTeam = async (req, res) => {
   try {
@@ -309,13 +310,13 @@ export const deleteTeam = async (req, res) => {
 export const sendChatMessage = async (req, res) => {
   try {
     const { teamId } = req.params;
-    const { message } = req.body;
     const userId = req.user.id;
+    const { message, messageType = 'text', fileUrl, fileName, fileSize } = req.body;
 
-    if (!message || !message.trim()) {
+    if (!message && !req.file && !fileUrl) {
       return res.status(400).json({
         success: false,
-        message: "Message is required",
+        message: "Message or file is required",
       });
     }
 
@@ -371,10 +372,44 @@ export const sendChatMessage = async (req, res) => {
       });
     }
 
+    let finalFileUrl = fileUrl;
+    let finalMessageType = messageType;
+    let finalFileName = fileName;
+    let finalFileSize = fileSize;
+
+    // Handle file upload if present
+    if (req.file) {
+      try {
+        const fileData = {
+          buffer: req.file.buffer,
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size
+        };
+        const uploadResult = await uploadImageToCloudinary(fileData, 'team-hub-chat');
+        finalFileUrl = uploadResult.url;
+        finalFileName = uploadResult.filename;
+        finalFileSize = uploadResult.size;
+
+        if (fileData.mimetype.startsWith('image/')) {
+          finalMessageType = 'image';
+        } else {
+          finalMessageType = 'file';
+        }
+      } catch (err) {
+        console.error("Cloudinary upload failed in team chat:", err);
+        return res.status(500).json({ success: false, message: "File upload failed" });
+      }
+    }
+
     // Create new message
     const newMessage = {
       sender: userId,
-      message: message.trim(),
+      message: message ? message.trim() : (finalMessageType === 'text' ? '' : `Shared a ${finalMessageType}`),
+      messageType: finalMessageType,
+      fileUrl: finalFileUrl,
+      fileName: finalFileName,
+      fileSize: finalFileSize,
       timestamp: new Date(),
       isAdmin: isCreator || isAdmin,
     };
@@ -385,9 +420,10 @@ export const sendChatMessage = async (req, res) => {
 
     // Populate sender info for response
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("chat.sender", "username email profilePicture")
-      .populate("members.user", "username email profilePicture")
-      .populate("createdBy", "username email profilePicture");
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
 
     // Emit socket event to team room
     if (req.io) {
@@ -490,11 +526,32 @@ export const addUserToTeam = async (req, res) => {
       status: "active",
     });
 
+    // Add system message about new member
+    const systemMessage = {
+      sender: userId,
+      message: `👋 ${userToAdd.Fullname || userToAdd.username || userToAdd.email} has joined the team!`,
+      timestamp: new Date(),
+      isAdmin: true,
+      isSystemMessage: true,
+      messageType: "system",
+    };
+    team.chat.push(systemMessage);
+
     await team.save();
 
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("createdBy", "name email")
-      .populate("members.user", "name email");
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: null // No specific new message, but we update the team state
+        });
+    }
 
     res.status(200).json({
       success: true,
@@ -539,17 +596,41 @@ export const removeUserFromTeam = async (req, res) => {
       });
     }
 
+    const removedUser = await UserModel.findById(userToRemoveId);
+    const removedName = removedUser ? (removedUser.Fullname || removedUser.username || removedUser.email) : "A member";
+
     team.members = team.members.filter(
       (member) =>
         member.user.toString() !== userToRemoveId.toString() &&
         member.user !== userToRemoveId
     );
 
+    // Add system message about removal
+    const systemMessage = {
+      sender: userId,
+      message: `🚫 ${removedName} was removed from the team`,
+      timestamp: new Date(),
+      isAdmin: true,
+      isSystemMessage: true,
+      messageType: "system",
+    };
+    team.chat.push(systemMessage);
+
     await team.save();
 
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("createdBy", "name email")
-      .populate("members.user", "name email");
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: null
+        });
+    }
 
     res.status(200).json({
       success: true,
@@ -613,8 +694,18 @@ export const promoteUserToAdmin = async (req, res) => {
     await team.save();
 
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("createdBy", "name email")
-      .populate("members.user", "name email");
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: null
+        });
+    }
 
     res.status(200).json({
       success: true,
@@ -678,8 +769,18 @@ export const demoteUserFromAdmin = async (req, res) => {
     await team.save();
 
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("createdBy", "name email")
-      .populate("members.user", "name email");
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: null
+        });
+    }
 
     res.status(200).json({
       success: true,
@@ -707,8 +808,8 @@ export const getUserTeams = async (req, res) => {
     const teams = await TeamHub.find({
       $or: [{ createdBy: userId }, { "members.user": userId }],
     })
-      .populate("createdBy", "name email")
-      .populate("members.user", "name email")
+      .populate("createdBy", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -734,9 +835,9 @@ export const getTeamById = async (req, res) => {
     console.log(`Fetching team: ${teamId} for user: ${userId}`); // cache debug
 
     const team = await TeamHub.findById(teamId)
-      .populate("createdBy", "name email")
-      .populate("members.user", "name email")
-      .populate("chat.sender", "name email");
+      .populate("createdBy", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("chat.sender", "username Fullname email profileImage");
 
     if (!team) {
       return res.status(404).json({
@@ -817,8 +918,8 @@ export const getTeamTasks = async (req, res) => {
 
     // Populate assignedTo field for tasks
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("tasks.assignedTo", "name email")
-      .populate("members.user", "name email");
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage");
 
     res.status(200).json({
       success: true,
@@ -962,28 +1063,12 @@ export const createTeamTask = async (req, res) => {
 
     team.tasks.push(newTask);
 
-    // Add system message to chat about task creation
-    const systemMessage = {
-      sender: userId,
-      message: `📋 New task created: "${newTask.title}"${
-        newTask.amount > 0 ? ` ($${newTask.amount})` : ""
-      }${
-        newTask.assignedToEmail
-          ? ` - Assigned to: ${newTask.assignedToEmail}`
-          : ""
-      }`,
-      timestamp: new Date(),
-      isAdmin: true,
-      isSystemMessage: true,
-    };
-
-    team.chat.push(systemMessage);
-    await team.save();
-
     // Send email to assigned user
+    let assignedName = newTask.assignedToEmail || "a team member";
     if (assignedTo) {
       const assignedUser = await UserModel.findById(assignedTo);
       if (assignedUser) {
+        assignedName = assignedUser.Fullname || assignedUser.username || assignedUser.email;
         await sendTaskAssignmentEmail(
           assignedUser.email,
           assignedUser.username || assignedUser.Fullname,
@@ -995,11 +1080,35 @@ export const createTeamTask = async (req, res) => {
       }
     }
 
+    // Add system message to chat about task creation
+    const systemMessage = {
+      sender: userId,
+      message: `📋 New task: "${newTask.title}"${
+        newTask.amount > 0 ? ` ($${newTask.amount})` : ""
+      } - Assigned to: ${assignedName}`,
+      timestamp: new Date(),
+      isAdmin: true,
+      isSystemMessage: true,
+      messageType: "system",
+    };
+
+    team.chat.push(systemMessage);
+    await team.save();
+
     // Populate team data for response
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("chat.sender", "username email profilePicture")
-      .populate("members.user", "username email profilePicture")
-      .populate("createdBy", "username email profilePicture");
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: populatedTeam.chat[populatedTeam.chat.length - 1]
+        });
+    }
 
     res.status(201).json({
       success: true,
@@ -1077,6 +1186,15 @@ export const updateTeamTask = async (req, res) => {
       task.status = status;
       if (status === "completed") {
         task.completedAt = new Date();
+
+        const systemMessage = {
+          sender: userId,
+          message: `✅ Task completed: "${task.title}"`,
+          timestamp: new Date(),
+          isAdmin: true,
+          isSystemMessage: true,
+          messageType: "system",
+        };
 
         // Handle earning distribution when task is completed
         if (
@@ -1171,6 +1289,7 @@ export const updateTeamTask = async (req, res) => {
           timestamp: new Date(),
           isAdmin: true,
           isSystemMessage: true,
+          messageType: "system",
         };
         team.chat.push(systemMessage);
 
@@ -1230,6 +1349,7 @@ export const updateTeamTask = async (req, res) => {
                 timestamp: new Date(),
                 isAdmin: true,
                 isSystemMessage: true,
+                messageType: "system",
               };
               team.chat.push(refundMessage);
             }
@@ -1244,9 +1364,18 @@ export const updateTeamTask = async (req, res) => {
 
     // Populate team data for response
     const populatedTeam = await TeamHub.findById(teamId)
-      .populate("chat.sender", "username email profilePicture")
-      .populate("members.user", "username email profilePicture")
-      .populate("createdBy", "username email profilePicture");
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: populatedTeam.chat[populatedTeam.chat.length - 1]
+        });
+    }
 
     res.status(200).json({
       success: true,
@@ -1313,10 +1442,24 @@ export const updateTeamSettings = async (req, res) => {
 
     await team.save();
 
+    const populatedTeam = await TeamHub.findById(teamId)
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: null
+        });
+    }
+
     res.status(200).json({
       success: true,
       message: "Team settings updated successfully",
-      team: team,
+      team: populatedTeam,
     });
   } catch (error) {
     console.error("Error updating team settings:", error);
@@ -1366,9 +1509,39 @@ export const leaveTeam = async (req, res) => {
       });
     }
 
+    // Get user info for system message before removing
+    const leavingUser = await UserModel.findById(userId);
+    const leavingName = leavingUser ? (leavingUser.Fullname || leavingUser.username || leavingUser.email) : "A member";
+
     // Remove the member from the team
     team.members.splice(memberIndex, 1);
+
+    // Add system message about leaving
+    const systemMessage = {
+      sender: userId,
+      message: `🚪 ${leavingName} has left the team`,
+      timestamp: new Date(),
+      isAdmin: true,
+      isSystemMessage: true,
+      messageType: "system",
+    };
+    team.chat.push(systemMessage);
+
     await team.save();
+
+    const populatedTeam = await TeamHub.findById(teamId)
+      .populate("chat.sender", "username Fullname email profileImage")
+      .populate("members.user", "username Fullname email profileImage")
+      .populate("tasks.assignedTo", "username Fullname email profileImage")
+      .populate("createdBy", "username Fullname email profileImage");
+
+    // Emit socket event to team room
+    if (req.io) {
+        req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+            team: populatedTeam,
+            message: null
+        });
+    }
 
     res.status(200).json({
       success: true,
@@ -1565,4 +1738,135 @@ export const getTeamHubClientNotifications = async (req, res) => {
     console.error("Error fetching TeamHub client notifications:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
+};
+
+export const startTeamCall = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.user.id;
+
+    const team = await TeamHub.findById(teamId);
+    if (!team) return res.status(404).json({ success: false, message: "Team not found" });
+
+    // Permissions check: Only creator can start a call
+    const isCreator = team.createdBy.toString() === userId.toString();
+    if (!isCreator) return res.status(403).json({ 
+      success: false, 
+      message: "Only the team owner can start a video call" 
+    });
+
+    if (team.activeCallId) {
+       return res.status(200).json({ 
+         success: true, 
+         message: "Call already in progress", 
+         activeCallId: team.activeCallId 
+       });
+    }
+
+    const callId = `team_${teamId}_${Date.now()}`;
+    team.activeCallId = callId;
+    team.callStartedAt = new Date();
+    team.callStartedBy = userId;
+
+    // Add system message to chat
+    team.chat.push({
+      sender: userId,
+      message: `🎥 Team video call started`,
+      timestamp: new Date(),
+      isAdmin: true,
+      isSystemMessage: true,
+      messageType: "system"
+    });
+
+    await team.save();
+
+    // Notify all members via Socket
+    if (req.io) {
+      req.io.to(`team_${teamId}`).emit("teamCallStarted", {
+        teamId,
+        callId,
+        startedBy: userId,
+        startedByName: req.user.username || req.user.Fullname || "A member"
+      });
+      
+      // Also emit the updated team state to sync chat
+      req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+        team: await TeamHub.findById(teamId)
+          .populate("chat.sender", "username Fullname email profileImage")
+          .populate("members.user", "username Fullname email profileImage")
+          .populate("tasks.assignedTo", "username Fullname email profileImage")
+          .populate("createdBy", "username Fullname email profileImage"),
+        message: team.chat[team.chat.length - 1]
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      callId,
+      message: "Call started successfully"
+    });
+  } catch (error) {
+    console.error("Error starting team call:", error);
+    res.status(500).json({ success: false, message: "Error starting call" });
+  }
+};
+
+export const endTeamCall = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.user.id;
+    const team = await TeamHub.findById(teamId);
+    if (!team) return res.status(404).json({ success: false, message: "Team not found" });
+
+    // Only creator or an admin can force end the call for everyone
+    const isCreator = team.createdBy.toString() === userId.toString();
+    const isAdmin = team.members.some(m => m.user.toString() === userId.toString() && m.role === "admin");
+    
+    if (!isCreator && !isAdmin) {
+       return res.status(403).json({ success: false, message: "Only owners or admins can end team calls" });
+    }
+
+    team.activeCallId = null;
+    team.callStartedAt = null;
+    team.callStartedBy = null;
+    await team.save();
+
+    if (req.io) {
+      req.io.to(`team_${teamId}`).emit("teamCallEnded", { teamId });
+      
+      // Update team state for everyone to hide the Join button
+      req.io.to(`team_${teamId}`).emit("newTeamMessage", {
+        team: await TeamHub.findById(teamId)
+          .populate("chat.sender", "username Fullname email profileImage")
+          .populate("members.user", "username Fullname email profileImage")
+          .populate("tasks.assignedTo", "username Fullname email profileImage")
+          .populate("createdBy", "username Fullname email profileImage"),
+        message: null
+      });
+    }
+
+    res.status(200).json({ success: true, message: "Call ended successfully" });
+  } catch (error) {
+    console.error("Error ending team call:", error);
+    res.status(500).json({ success: false, message: "Error ending call" });
+  }
+};
+
+export const joinTeamCall = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        // The middleware generateTokenMiddleware might already give us a token
+        // But we need a way to get it specifically for a user joining an existing call
+        const token = streamClient.createToken(userId);
+        
+        res.status(200).json({
+            success: true,
+            token,
+            apiKey: process.env.STREAM_API_KEY,
+            appId: process.env.STREAM_APP_ID
+        });
+    } catch (error) {
+        console.error("Error joining team call:", error);
+        res.status(500).json({ success: false, message: "Error getting token" });
+    }
 };

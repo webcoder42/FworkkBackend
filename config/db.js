@@ -1,13 +1,6 @@
 import mongoose from "mongoose";
 
-/**
- * Connect to MongoDB with optimized connection pooling
- * maxPoolSize: Max number of concurrent connections (default 100)
- * minPoolSize: Min number of idle connections to keep (prevents cold starts)
- * connectTimeoutMS: How long to wait for initial connection (10s)
- * socketTimeoutMS: How long to wait for data (45s)
- * serverSelectionTimeoutMS: How long to wait for server selection (5s)
- */
+
 const connectDB = async () => {
   try {
     if (!process.env.MONGODB_URL) {

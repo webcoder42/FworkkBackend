@@ -12,7 +12,6 @@ export const allowedOrigins = [
   "http://localhost:3000",
   "https://fworkk.vercel.app",
   "http://fworkk.vercel.app",
-  "https://fworkk.netlify.app", // Keeping temporarily for transition
   process.env.FRONTEND_URL,
   process.env.API_FRONTENT_URL,
   process.env.API_FRONTENT_URL?.replace('http://', 'https://'),

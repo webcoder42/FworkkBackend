@@ -26,7 +26,12 @@ router.get("/check-application/:projectId", requireSignIn, checkIfUserApplied);
 
 router.post("/apply", requireSignIn, applyToProject);
 
-router.get("/applied-projects", requireSignIn, getAppliedProjects);
+router.get(
+  "/applied-projects", 
+  requireSignIn, 
+  cacheMiddleware(30, 'applied-projects'),
+  getAppliedProjects
+);
 
 // Check hired applications
 router.get("/applications/hired", requireSignIn, checkHiredApplications);
@@ -37,7 +42,7 @@ router.get("/hire-notifications", requireSignIn, getHireNotifications);
 // Get applicants count for all projects
 router.get(
   "/projects/applicants-count",
-  cacheMiddleware('project-applicnat-count' , 20),
+  cacheMiddleware(60, () => 'project-applicant-count:global'),
   requireSignIn,
   getApplicantsCountForProjects
 );
@@ -46,11 +51,17 @@ router.get(
 router.get(
   "/applicants-details/:projectId",
   requireSignIn,
+  cacheMiddleware(30, 'applicants-detail'),
   getApplicantsDetailsByProject
 );
 
 // Get all applications for client's projects
-router.get("/applications-for-client", requireSignIn, getApplicationsForClient);
+router.get(
+  "/applications-for-client", 
+  requireSignIn, 
+  cacheMiddleware(30, 'client-applications'),
+  getApplicationsForClient
+);
 
 // Calculate real-time match percentage
 router.post("/calculate-match", requireSignIn, calculateMatchPercentage);
@@ -72,6 +83,11 @@ router.post(
 router.get("/cancelled/:userId", getCancelledProjectsForUser);
 
 // Keep the catch-all id route LAST to avoid shadowing more specific routes
-router.get("/:id", requireSignIn, getProjectDetails);
+router.get(
+  "/:id", 
+  requireSignIn, 
+  cacheMiddleware(30, 'project-detail'),
+  getProjectDetails
+);
 
 export default router;

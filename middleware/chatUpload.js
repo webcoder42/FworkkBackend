@@ -8,6 +8,7 @@ const fileFilter = (req, file, cb) => {
   // Allowed types: Images, PDFs, Docs, Text, Archives
   const allowedMimeTypes = [
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+    'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime',
     'application/pdf',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
@@ -18,7 +19,7 @@ const fileFilter = (req, file, cb) => {
   ];
   
   // Also check extension as a fallback
-  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.doc', '.docx', '.txt', '.zip', '.rar'];
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.webm', '.ogg', '.mov', '.pdf', '.doc', '.docx', '.txt', '.zip', '.rar'];
   const ext = file.originalname.toLowerCase().match(/\.[0-9a-z]+$/i)?.[0];
 
   if (allowedMimeTypes.includes(file.mimetype) || (ext && allowedExtensions.includes(ext))) {

@@ -1,3 +1,4 @@
+import fetch from "node-fetch";
 import Stripe from "stripe";
 import PlanSchemaModel from "../Model/PlanSchemaModel.js";
 // Force restart
@@ -301,14 +302,14 @@ export const createPlanPurchase = async (req, res) => {
         reason: `Plan purchase: ${plan.planName}`
       }); 
 
-      // Send email notification for deduction
-      await sendEarningUpdateEmail(
+      // Send email notification for deduction (non-blocking)
+      sendEarningUpdateEmail(
         user.email,
         user.username || user.Fullname,
         plan.price,
         'decrement',
         `Deduction for purchasing plan: "${plan.planName}"`
-      );
+      ).catch(err => console.error("Plan purchase email error:", err));
 
       // Expire previous plans
       await PlanPurchaseModel.updateMany(
@@ -549,14 +550,14 @@ export const addFunds = async (req, res) => {
           reason: `Added funds via Card`
         });
 
-        // Send email notification for addition
-        await sendEarningUpdateEmail(
+        // Send email notification for addition (non-blocking)
+        sendEarningUpdateEmail(
           user.email,
           user.username || user.Fullname,
           amountToAdd,
           'increment',
           `Funds added to your account via Card (Net: $${amountToAdd})`
-        );
+        ).catch(err => console.error("Earning email error:", err));
 
         user.addFundLogs = user.addFundLogs || [];
         user.addFundLogs.push({
@@ -649,6 +650,12 @@ export const addFunds = async (req, res) => {
           }
         );
 
+        if (!captureResponse.ok) {
+          const errorText = await captureResponse.text();
+          console.error("PayPal Capture Error:", errorText);
+          return res.status(500).json({ message: "PayPal failed to capture payment. Please contact support." });
+        }
+
         let captureData;
         try {
              captureData = await captureResponse.json();
@@ -662,7 +669,23 @@ export const addFunds = async (req, res) => {
           captureData.purchase_units?.[0]?.payments?.captures?.[0]?.status ===
             "COMPLETED"
         ) {
-          const amountToAdd = amount - (amount * addFundTax) / 100;
+          // If grossAmount/netAmount handling is used
+          const grossPaid = req.body.grossAmount ? Number(req.body.grossAmount) : amount;
+          const netIntended = req.body.amount; // In the new flow, 'amount' is the net credit
+          
+          let amountToAdd;
+          let taxAmount;
+
+          if (req.body.grossAmount) {
+              // We charged fees on top of intended credit
+              amountToAdd = Number(netIntended);
+              taxAmount = Number(grossPaid) - amountToAdd;
+          } else {
+              // Legacy/Old flow: deducted from 'amount'
+              amountToAdd = amount - (amount * addFundTax) / 100;
+              taxAmount = (amount * addFundTax) / 100;
+          }
+
           user.totalEarnings = (user.totalEarnings || 0) + amountToAdd;
 
           // Logs
@@ -670,24 +693,24 @@ export const addFunds = async (req, res) => {
           user.EarningLogs.push({ 
             amount: amountToAdd, 
             date: new Date() ,
-            reason: `Added funds via PayPal`
+            reason: `Added funds via PayPal (Internal Ref: ${req.body.grossAmount ? 'Fee Covered' : 'Fee Deducted'})`
           });
 
-          // Send email notification for addition
-          await sendEarningUpdateEmail(
+          // Send email notification for addition (non-blocking for faster UI)
+          sendEarningUpdateEmail(
             user.email,
             user.username || user.Fullname,
             amountToAdd,
             'increment',
             `Funds added to your account via PayPal (Net: $${amountToAdd})`
-          );
+          ).catch(err => console.error("Failed to send earning update email:", err));
 
           user.addFundLogs = user.addFundLogs || [];
           user.addFundLogs.push({
-            amount,
+            amount: grossPaid, // Use the actual amount paid
             credited: amountToAdd,
             date: new Date(),
-            note: "",
+            note: req.body.grossAmount ? "Fee Covered by Buyer" : "Fee Deducted from Amount",
             paymentMethod: "paypal",
             transactionId:
               captureData.purchase_units?.[0]?.payments?.captures?.[0]?.id ||
@@ -699,9 +722,9 @@ export const addFunds = async (req, res) => {
             user: userId,
             plan: null,
             amount: amountToAdd,
-            originalAmount: amount,
-            taxPercent: addFundTax,
-            taxAmount: (amount * addFundTax) / 100,
+            originalAmount: grossPaid,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
+            taxAmount: taxAmount,
             paymentMethod: "paypal",
             paymentDetails: {
               paymentIntentId:
@@ -712,6 +735,9 @@ export const addFunds = async (req, res) => {
                   (link) => link.rel === "self"
                 )?.href || null,
               additionalDetails: captureData,
+              feeTotal: taxAmount,
+              netCredit: amountToAdd,
+              grossCaptured: grossPaid
             },
             status: "approved",
             startDate: new Date(),
@@ -726,10 +752,10 @@ export const addFunds = async (req, res) => {
             amount: amountToAdd,
             balanceAfter: user.totalEarnings,
             category: "add_fund",
-            description: "Funds added via PayPal",
-            grossAmount: amount,
-            taxAmount: (amount * addFundTax) / 100,
-            taxPercent: addFundTax,
+            description: `Funds added via PayPal (${req.body.grossAmount ? 'Total Paid: $' + grossPaid : 'Deducted'})`,
+            grossAmount: grossPaid,
+            taxAmount: taxAmount,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
             paymentId: captureData.id
           });
 
@@ -738,9 +764,9 @@ export const addFunds = async (req, res) => {
           return res.status(200).json({
             message: "Funds added successfully via PayPal.",
             amountAdded: amountToAdd,
-            taxPercent: addFundTax,
-            taxAmount: (amount * addFundTax) / 100,
-            originalAmount: amount,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
+            taxAmount: taxAmount,
+            originalAmount: grossPaid,
             receiptUrl:
               captureData.purchase_units?.[0]?.payments?.captures?.[0]?.links?.find(
                 (link) => link.rel === "self"
@@ -819,7 +845,20 @@ export const addFunds = async (req, res) => {
         }
 
         if (paymentData.status === "paid" || paymentData.status === "captured") {
-          const amountToAdd = amount - (amount * addFundTax) / 100;
+          const grossPaid = req.body.grossAmount ? Number(req.body.grossAmount) : (paymentData.amount / 100);
+          const netIntended = req.body.amount;
+
+          let amountToAdd;
+          let taxAmount;
+
+          if (req.body.grossAmount) {
+              amountToAdd = Number(netIntended);
+              taxAmount = Number(grossPaid) - amountToAdd;
+          } else {
+              amountToAdd = amount - (amount * addFundTax) / 100;
+              taxAmount = (amount * addFundTax) / 100;
+          }
+
           user.totalEarnings = (user.totalEarnings || 0) + amountToAdd;
 
           // Logs
@@ -827,24 +866,24 @@ export const addFunds = async (req, res) => {
           user.EarningLogs.push({ 
             amount: amountToAdd, 
             date: new Date(),
-            reason: `Added funds via Moyasar`
+            reason: `Added funds via Moyasar (Fee Covered)`
           });
 
-          // Send email notification for addition
-          await sendEarningUpdateEmail(
+          // Send email notification for addition (non-blocking)
+          sendEarningUpdateEmail(
             user.email,
             user.username || user.Fullname,
             amountToAdd,
             'increment',
             `Funds added to your account via Moyasar (Net: $${amountToAdd})`
-          );
+          ).catch(err => console.error("Moyasar email error:", err));
 
           user.addFundLogs = user.addFundLogs || [];
           user.addFundLogs.push({
-            amount,
+            amount: grossPaid,
             credited: amountToAdd,
             date: new Date(),
-            note: "Moyasar Payment",
+            note: "Moyasar Payment (Fee Covered)",
             paymentMethod: "moyasar",
             transactionId: paymentData.id,
           });
@@ -854,9 +893,9 @@ export const addFunds = async (req, res) => {
             user: userId,
             plan: null,
             amount: amountToAdd,
-            originalAmount: amount,
-            taxPercent: addFundTax,
-            taxAmount: (amount * addFundTax) / 100,
+            originalAmount: grossPaid,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
+            taxAmount: taxAmount,
             paymentMethod: "moyasar",
             paymentDetails: {
               paymentIntentId: paymentData.id,
@@ -876,10 +915,10 @@ export const addFunds = async (req, res) => {
             amount: amountToAdd,
             balanceAfter: user.totalEarnings,
             category: "add_fund",
-            description: "Funds added via Moyasar",
-            grossAmount: amount,
-            taxAmount: (amount * addFundTax) / 100,
-            taxPercent: addFundTax,
+            description: `Funds added via Moyasar (${req.body.grossAmount ? 'Fee Covered' : 'Deducted'})`,
+            grossAmount: grossPaid,
+            taxAmount: taxAmount,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
             paymentId: paymentData.id
           });
 
@@ -888,9 +927,9 @@ export const addFunds = async (req, res) => {
           return res.status(200).json({
             message: "Funds added successfully via Moyasar.",
             amountAdded: amountToAdd,
-            taxPercent: addFundTax,
-            taxAmount: (amount * addFundTax) / 100,
-            originalAmount: amount,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
+            taxAmount: taxAmount,
+            originalAmount: grossPaid,
             receiptUrl: paymentData.source?.transaction_url || null,
           });
         } else {
@@ -915,8 +954,9 @@ export const addFunds = async (req, res) => {
       }
 
       try {
+        const chargingAmount = req.body.grossAmount || amount;
         const result = await braintreeGateway.transaction.sale({
-          amount: amount,
+          amount: chargingAmount,
           paymentMethodNonce: paymentMethodNonce,
           options: {
             submitForSettlement: true,
@@ -924,32 +964,45 @@ export const addFunds = async (req, res) => {
         });
 
         if (result.success) {
-          const amountToAdd = amount - (amount * addFundTax) / 100;
+          const grossPaid = req.body.grossAmount ? Number(req.body.grossAmount) : amount;
+          const netIntended = req.body.amount;
+
+          let amountToAdd;
+          let taxAmount;
+
+          if (req.body.grossAmount) {
+              amountToAdd = Number(netIntended);
+              taxAmount = Number(grossPaid) - amountToAdd;
+          } else {
+              amountToAdd = amount - (amount * addFundTax) / 100;
+              taxAmount = (amount * addFundTax) / 100;
+          }
+
           user.totalEarnings = (user.totalEarnings || 0) + amountToAdd;
 
-            // Logs
-            user.EarningLogs = user.EarningLogs || [];
-            user.EarningLogs.push({ 
-              amount: amountToAdd, 
-              date: new Date(),
-              reason: `Added funds via Braintree`
-            });
+          // Logs
+          user.EarningLogs = user.EarningLogs || [];
+          user.EarningLogs.push({ 
+            amount: amountToAdd, 
+            date: new Date(),
+            reason: `Added funds via Braintree (Fee Covered)`
+          });
 
-            // Send email notification for addition
-            await sendEarningUpdateEmail(
+            // Send email notification for addition (non-blocking)
+            sendEarningUpdateEmail(
               user.email,
               user.username || user.Fullname,
               amountToAdd,
               'increment',
               `Funds added to your account via Braintree (Net: $${amountToAdd})`
-            );
+            ).catch(err => console.error("Braintree email error:", err));
 
           user.addFundLogs = user.addFundLogs || [];
           user.addFundLogs.push({
-            amount,
+            amount: grossPaid,
             credited: amountToAdd,
             date: new Date(),
-            note: "Braintree Payment",
+            note: "Braintree Payment (Fee Covered)",
             paymentMethod: "braintree",
             transactionId: result.transaction.id,
           });
@@ -959,9 +1012,9 @@ export const addFunds = async (req, res) => {
             user: userId,
             plan: null,
             amount: amountToAdd,
-            originalAmount: amount,
-            taxPercent: addFundTax,
-            taxAmount: (amount * addFundTax) / 100,
+            originalAmount: grossPaid,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
+            taxAmount: taxAmount,
             paymentMethod: "braintree",
             paymentDetails: {
               paymentIntentId: result.transaction.id,
@@ -981,10 +1034,10 @@ export const addFunds = async (req, res) => {
             amount: amountToAdd,
             balanceAfter: user.totalEarnings,
             category: "add_fund",
-            description: "Funds added via Braintree",
-            grossAmount: amount,
-            taxAmount: (amount * addFundTax) / 100,
-            taxPercent: addFundTax,
+            description: `Funds added via Braintree (${req.body.grossAmount ? 'Fee Covered' : 'Deducted'})`,
+            grossAmount: grossPaid,
+            taxAmount: taxAmount,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
             paymentId: result.transaction.id
           });
 
@@ -993,9 +1046,9 @@ export const addFunds = async (req, res) => {
           return res.status(200).json({
             message: "Funds added successfully via Braintree.",
             amountAdded: amountToAdd,
-            taxPercent: addFundTax,
-            taxAmount: (amount * addFundTax) / 100,
-            originalAmount: amount,
+            taxPercent: req.body.grossAmount ? ((taxAmount / amountToAdd) * 100).toFixed(1) : addFundTax,
+            taxAmount: taxAmount,
+            originalAmount: grossPaid,
             receiptUrl: null,
           });
         } else {
@@ -1035,25 +1088,45 @@ export const getPayPalAccessToken = async () => {
     PAYPAL_MODE === "live"
       ? "https://api-m.paypal.com"
       : "https://api-m.sandbox.paypal.com";
-      
-  const auth = Buffer.from(
-    `${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`
-  ).toString("base64");
 
-  const response = await fetch(`${baseUrl}/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${auth}`,
-    },
-    body: "grant_type=client_credentials",
-  });
+  if (!PAYPAL_CLIENT_ID || !PAYPAL_SECRET) {
+    console.error("❌ PayPal credentials missing in environment variables");
+    throw new Error("PayPal configuration error - missing credentials");
+  }
 
-  const data = await response.json();
-  if (data.access_token) {
+  const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString(
+    "base64"
+  );
+
+  console.log(`ℹ️ Requesting PayPal Access Token from: ${baseUrl}/v1/oauth2/token`);
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${auth}`,
+      },
+      body: "grant_type=client_credentials",
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ PayPal Token Error: ${response.status}`, errorText);
+      throw new Error(`PayPal API error: ${response.status} - ${errorText.substring(0, 100)}`);
+    }
+
+    const data = await response.json();
+    if (data.access_token) {
+      console.log("✅ PayPal Access Token generated successfully");
       return { accessToken: data.access_token, baseUrl };
-  } else {
-      throw new Error("Failed to generate PayPal Access Token");
+    } else {
+      console.error("❌ PayPal Token Response missing access_token:", data);
+      throw new Error("Failed to generate PayPal Access Token - missing token in response");
+    }
+  } catch (error) {
+    console.error("❌ getPayPalAccessToken Exception:", error.message);
+    throw error;
   }
 };
 
@@ -1069,22 +1142,24 @@ export const createPayPalOrder = async (req, res) => {
          .json({ error: "PayPal configuration error - check environment vars" });
      }
 
-     let price = 0;
-     if (planId) {
-       // If planId is provided, use plan price
-       const plan = await PlanSchemaModel.findById(planId);
-       if (!plan || !plan.price || plan.price <= 0) {
-         return res.status(400).json({ error: "Invalid plan or price <= 0" });
-       }
-       price = plan.price;
-     } else if (amount && !isNaN(amount) && Number(amount) > 0) {
-       // If no planId, use amount from body
-       price = Number(amount);
-     } else {
-       return res.status(400).json({ error: "Amount is required if no planId" });
-     }
+      let price = 0;
+      if (amount && !isNaN(amount) && Number(amount) > 0) {
+        // Use the explicit amount if provided (this covers fees calculated by frontend)
+        price = Number(amount);
+      } else if (planId) {
+        // Fallback to plan price if no amount is sent
+        const plan = await PlanSchemaModel.findById(planId);
+        if (!plan || !plan.price || plan.price <= 0) {
+          return res.status(400).json({ error: "Invalid plan or price <= 0" });
+        }
+        price = plan.price;
+      } else {
+        return res.status(400).json({ error: "Amount or planId is required" });
+      }
 
      const { accessToken, baseUrl } = await getPayPalAccessToken();
+
+     const amountVal = parseFloat(price).toFixed(2); // Define amountVal here
 
      const response = await fetch(`${baseUrl}/v2/checkout/orders`, {
        method: "POST",
@@ -1099,8 +1174,9 @@ export const createPayPalOrder = async (req, res) => {
            {
              amount: {
                currency_code: "USD",
-               value: parseFloat(price).toFixed(2),
+               value: amountVal,
              },
+             description: `Plan Purchase/Funding for ${req.user.email}`,
            },
          ],
          application_context: {

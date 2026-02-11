@@ -1,30 +1,52 @@
-import { redisClient } from "../server.js";
+import { redisClient } from "../config/redis.js";
+import logger from "../utils/logger.js";
 
-export const cacheMiddleware = (keyGenerator, ttl = 3600) => {
+/**
+ * Redis Cache Middleware
+ * @param {number} duration - Cache duration in seconds
+ * @param {string|function} keyPrefix - Prefix for the cache key or a function (req) => key
+ */
+export const cacheMiddleware = (duration, keyPrefix) => {
   return async (req, res, next) => {
+    // Only cache GET requests
+    if (req.method !== 'GET') {
+      return next();
+    }
+
+    let key;
+    if (typeof keyPrefix === 'function') {
+      key = keyPrefix(req);
+    } else {
+      key = `${keyPrefix}:${req.user?.id || 'public'}:${req.originalUrl || req.url}`;
+    }
+
     try {
-      const key =
-        typeof keyGenerator === "function"
-          ? keyGenerator(req)
-          : keyGenerator;
-
       const cachedData = await redisClient.get(key);
-
       if (cachedData) {
-        res.setHeader("X-Cache", "HIT");
-        console.log(`⚡ Redis HIT: ${key}`);
+        // logger.info(`⚡ Redis HIT: ${key}`);
         return res.status(200).json(JSON.parse(cachedData));
       }
+      
+      // logger.info(`🐢 Redis MISS: ${key}`);
 
-      res.setHeader("X-Cache", "MISS");
-      console.log(`🐢 Redis MISS: ${key}`);
-
-      res.locals.cacheKey = key;
-      res.locals.cacheTTL = ttl;
+      // Patch res.json to catch the response and save it to redis
+      const originalJson = res.json;
+      res.json = (body) => {
+        res.json = originalJson;
+        
+        // Only cache successful responses
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          redisClient.setEx(key, duration, JSON.stringify(body)).catch(err => {
+            logger.error(`Redis set error: ${err.message}`);
+          });
+        }
+        
+        return res.json(body);
+      };
 
       next();
     } catch (err) {
-      console.error("❌ Redis cache error:", err);
+      logger.error(`Redis middleare error: ${err.message}`);
       next();
     }
   };

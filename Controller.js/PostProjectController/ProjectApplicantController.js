@@ -26,28 +26,69 @@ export const getApplicantsForProject = async (req, res) => {
 
     const applicants = await ProjectApplyModel.find({ project: projectId }).populate({
         path: "user",
-        select: "username email profileImage completedProjects rating plan maxProjectPerDay socialLinks availability lastSeen",
+        select: "username email profileImage completedProjects rating plan maxProjectPerDay socialLinks availability lastSeen location",
     }).lean();
+
+    const TeamHubModel = mongoose.model("TeamHub");
+    const userIds = applicants.map(app => app.user?._id).filter(id => id);
+    
+    // Fetch active teams for these users
+    const teams = await TeamHubModel.find({
+      "members.user": { $in: userIds },
+      isActive: true
+    }).select("name members logo");
 
     const PlanPurchaseModel = mongoose.model("PlanPurchase");
     const activePlans = await PlanPurchaseModel.find({
-      user: { $in: applicants.map(a => a.user._id) },
+      user: { $in: userIds },
       status: "approved",
       endDate: { $gte: new Date() }
     }).populate("plan");
 
     const userPlanMap = {};
-    activePlans.forEach(p => { userPlanMap[p.user] = p; });
+    const userTeamMap = {};
 
-    const applicantsWithPlan = applicants.map(app => ({
+    activePlans.forEach(p => { userPlanMap[p.user] = p; });
+    
+    // Map users to their teams
+    teams.forEach(team => {
+      team.members.forEach(member => {
+        const uId = member.user.toString();
+        if (userIds.some(id => id.toString() === uId)) {
+          if (!userTeamMap[uId]) userTeamMap[uId] = [];
+          userTeamMap[uId].push({
+            _id: team._id,
+            name: team.name,
+            logo: team.logo,
+            role: member.role
+          });
+        }
+      });
+    });
+
+    const applicantsWithPlan = applicants.map(app => {
+      if (!app.user) return app;
+      
+      const userId = app.user._id.toString();
+      return {
       ...app,
-      IsPlanActive: userPlanMap[app.user._id] ? { ...userPlanMap[app.user._id].toObject(), name: userPlanMap[app.user._id].plan?.name } : null
-    }));
+      user: {
+        ...app.user,
+        teams: userTeamMap[userId] || []
+      },
+      IsPlanActive: userPlanMap[userId] ? { ...userPlanMap[userId].toObject(), name: userPlanMap[userId].plan?.name } : null
+      };
+    });
 
     const sorted = applicantsWithPlan.sort((a, b) => {
+      // 1. Membership priority
       if (!!a.IsPlanActive && !b.IsPlanActive) return -1;
       if (!a.IsPlanActive && !!b.IsPlanActive) return 1;
-      return (b.user?.completedProjects || 0) - (a.user?.completedProjects || 0);
+      
+      // 2. First Come First Serve (appliedAt ascending)
+      const dateA = new Date(a.appliedAt || a.createdAt);
+      const dateB = new Date(b.appliedAt || b.createdAt);
+      return dateA - dateB;
     });
 
     return res.status(200).json({ success: true, data: sorted });

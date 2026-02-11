@@ -1,6 +1,7 @@
 import FworkkPrimeModel from "../Model/FworkkPrimeModel.js";
 import UserModel from "../Model/UserModel.js";
 import { uploadImageToCloudinary } from "../services/cloudinaryService.js";
+import { client as streamClient } from "../services/streamToken.js";
 // sendEmail import removed, using EmailService instead
 
 import { 
@@ -198,7 +199,8 @@ export const getProjectRequest = async (req, res) => {
         await autoRejectPrimeInvitations();
         const project = await FworkkPrimeModel.findById(req.params.id)
             .populate('clientId', 'Fullname email phone profileImage')
-            .populate('selectedFreelancers.freelancerId', 'Fullname email profileImage skills rating hourlyRate availability');
+            .populate('selectedFreelancers.freelancerId', 'Fullname email profileImage skills rating hourlyRate availability')
+            .populate('callJoinRequests.user', 'Fullname username profileImage email');
 
         if (!project) {
             return res.status(404).json({
@@ -208,11 +210,14 @@ export const getProjectRequest = async (req, res) => {
         }
 
         // Check authorization
-        const clientId = project.clientId._id || project.clientId;
+        const clientId = project.clientId?._id || project.clientId;
+        if (!clientId) {
+            return res.status(500).json({ success: false, message: "Project has no client owner" });
+        }
         const isClient = clientId.toString() === req.user.id.toString();
         const isAdmin = req.user.role === 'admin';
-        const isFreelancerInTeam = project.selectedFreelancers.some(
-            f => f.freelancerId && (f.freelancerId._id || f.freelancerId).toString() === req.user.id.toString()
+        const isFreelancerInTeam = (project.selectedFreelancers || []).some(
+            f => f?.freelancerId && (f.freelancerId._id || f.freelancerId).toString() === req.user.id.toString()
         );
 
         if (!isClient && !isAdmin && !isFreelancerInTeam) {
@@ -265,7 +270,7 @@ export const updateProjectRequest = async (req, res) => {
 
         // Check if project can be updated
         // Allowed statuses for editing: Not_Started, Started, team_selection (basically before 'Worked Started')
-        const allowedStatuses = ['Not_Started', 'Started', 'team_selection'];
+        const allowedStatuses = ['Not_Started', 'Started', 'team_selection', 'Worked Started'];
         if (!allowedStatuses.includes(project.status)) {
             return res.status(400).json({
                 success: false,
@@ -373,10 +378,27 @@ export const updateProjectRequest = async (req, res) => {
         // Validate team roles total matches team size if either changed
         const finalTeamSize = project.teamSize;
         const totalRolesQuantity = project.teamRoles.reduce((sum, role) => sum + role.quantity, 0);
-        if (totalRolesQuantity !== finalTeamSize) {
-            return res.status(400).json({
+        
+        if (finalTeamSize > totalRolesQuantity) {
+            // Auto-adjust: Add difference to the last role or create a generic one if empty
+            const diff = finalTeamSize - totalRolesQuantity;
+            
+            if (project.teamRoles.length > 0) {
+                // Add to last role
+                project.teamRoles[project.teamRoles.length - 1].quantity += diff;
+            } else {
+                // Create default role
+                project.teamRoles.push({
+                    role: 'Other',
+                    quantity: diff,
+                    skills: []
+                });
+            }
+        } else if (totalRolesQuantity > finalTeamSize) {
+             // If reducing size, we still enforce manual role reduction to avoid accidental data loss
+             return res.status(400).json({
                 success: false,
-                message: `Total team roles quantity (${totalRolesQuantity}) must match team size (${finalTeamSize})`
+                message: `Total team roles quantity (${totalRolesQuantity}) exceeds new team size (${finalTeamSize}). Please reduce role quantities first.`
             });
         }
 
@@ -1058,6 +1080,50 @@ export const getAcceptedPrimeProjects = async (req, res) => {
     }
 };
 
+// @desc    Get Prime projects history for any freelancer (public/client view)
+// @route   GET /api/fworkprime/freelancer-history/:freelancerId
+// @access  Private
+export const getFreelancerPrimeHistory = async (req, res) => {
+    try {
+        const { freelancerId } = req.params;
+        
+        const projects = await FworkkPrimeModel.find({
+            "selectedFreelancers": {
+                $elemMatch: {
+                    freelancerId: freelancerId,
+                    status: 'Accepted'
+                }
+            }
+        }).select('_id title description budget category status createdAt selectedFreelancers');
+
+        const formattedProjects = projects.map(project => {
+            const info = project.selectedFreelancers.find(f => f.freelancerId.toString() === freelancerId.toString());
+            const projectObj = project.toObject();
+            delete projectObj.selectedFreelancers;
+            
+            return {
+                ...projectObj,
+                role: info ? info.role : 'Member',
+                tasks: info ? info.tasks : [],
+                payoutRecords: info ? info.payoutRecords : []
+            };
+        });
+
+        res.status(200).json({
+            success: true,
+            data: formattedProjects
+        });
+
+    } catch (error) {
+        console.error("Error fetching freelancer prime history:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: error.message
+        });
+    }
+};
+
 export const addPayoutRecord = async (req, res) => {
     try {
         const { projectId, freelancerId, amount, description, type = "fixed" } = req.body;
@@ -1122,7 +1188,11 @@ export const addPayoutRecord = async (req, res) => {
                     // Increment user total earnings
                     await UserModel.findByIdAndUpdate(freelancerId, {
                         $inc: { totalEarnings: Number(amount) },
-                        $push: { EarningLogs: { amount: Number(amount), date: new Date() } }
+                        $push: { EarningLogs: { 
+                            amount: Number(amount), 
+                            date: new Date(),
+                            reason: `Fworkk Prime Payout: ${p.title} (${record.description})`
+                        } }
                     });
                     
                     console.log(`Payout ${payoutRecordId} automatically released after 10 minutes for user ${freelancerId}`);
@@ -1528,9 +1598,6 @@ export const updateTaskStatus = async (req, res) => {
                 return res.status(403).json({ success: false, message: "Only client or admin can approve tasks" });
             }
 
-            // Transfer amount to freelancer
-            freelancerUser.totalEarnings = (freelancerUser.totalEarnings || 0) + task.amount;
-            
             // Update Rating and Completed Projects
             const taskRating = Number(rating) || 5;
             freelancerUser.completedProjects = (freelancerUser.completedProjects || 0) + 1;
@@ -1668,7 +1735,11 @@ export const requestPayout = async (req, res) => {
                     // Increment user total earnings
                     await UserModel.findByIdAndUpdate(freelancerId, {
                         $inc: { totalEarnings: Number(amount) },
-                        $push: { EarningLogs: { amount: Number(amount), date: new Date() } }
+                        $push: { EarningLogs: { 
+                            amount: Number(amount), 
+                            date: new Date(),
+                            reason: `Fworkk Prime Payout: ${p.title} (${record.description})`
+                        } }
                     });
                     
                     console.log(`Payout ${payoutRecordId} automatically released after 10 minutes for user ${freelancerId}`);
@@ -1818,53 +1889,36 @@ export const addFundsToProject = async (req, res) => {
             return res.status(403).json({ success: false, message: "Unauthorized to add funds to this project" });
         }
 
-        // Restriction Check: 
-        // 1. If project is 'On Hold' or 'completed', allow funds (Emergency Case)
-        // 2. Otherwise, only allow if ALL tasks are 'Approved' or 'Cancelled'.
-        // Block if any task is 'Pending' or 'Submitted'.
-        const isEmergencyCase = ['On Hold', 'completed'].includes(project.status);
-        
-        if (!isEmergencyCase) {
-            let hasBlockedTasks = false;
-            project.selectedFreelancers.forEach(f => {
-                if (f.tasks && f.tasks.length > 0) {
-                    f.tasks.forEach(t => {
-                        if (['Pending', 'Submitted'].includes(t.status)) {
-                            hasBlockedTasks = true;
-                        }
-                    });
-                }
-            });
-
-            if (hasBlockedTasks) {
-                return res.status(400).json({
-                    success: false,
-                    message: "you have some task as a pending pleas approved it and etc ok asa ay"
-                });
-            }
-        }
-
+        // Check User Balance
         const user = await UserModel.findById(userId);
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
         const addAmount = Number(amount);
+        const userBalance = user.totalEarnings || 0;
 
-        // Check user's balance/earnings
-        if (user.totalEarnings < addAmount) {
-            return res.status(400).json({ 
-                success: false, 
-                message: `Insufficient funds. Available: $${user.totalEarnings}, Required: $${addAmount}` 
+        if (userBalance < addAmount) {
+             return res.status(400).json({
+                success: false,
+                message: `Insufficient balance. Available: $${userBalance}, Required: $${addAmount}. Please go to Add Funds page and add some amount first.`
             });
         }
+
+
 
         // Deduct from user and add to project
         user.totalEarnings -= addAmount;
         project.budget += addAmount;
 
-        // Log the spend if needed (Optional, following user pattern)
+        // Log the spend
         user.totalSpend = (user.totalSpend || 0) + addAmount;
+        if (!user.EarningLogs) user.EarningLogs = [];
+        user.EarningLogs.push({
+            amount: -addAmount,
+            date: new Date(),
+            reason: `Add Funds to Fworkk Prime Project: ${project.title}`
+        });
 
         await user.save();
         await project.save();
@@ -2013,6 +2067,239 @@ export const triggerAutoHire = async (req, res) => {
         });
     } catch (error) {
         console.error("Trigger Auto Hire Error:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+
+// Prime Video Call Logic
+export const startPrimeCall = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const userId = req.user.id;
+
+        const project = await FworkkPrimeModel.findById(projectId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        // Only owner or admin can start
+        const isOwner = project.clientId.toString() === userId.toString();
+        const isAdmin = req.user.role === 'admin';
+
+        if (!isOwner && !isAdmin) {
+            return res.status(403).json({ success: false, message: "Only project owner or admin can start a video call" });
+        }
+
+        if (project.activeCallId) {
+            return res.status(200).json({ 
+                success: true, 
+                message: "Call already in progress", 
+                callId: project.activeCallId 
+            });
+        }
+
+        const callId = `prime_${projectId}_${Date.now()}`;
+        project.activeCallId = callId;
+        project.callStartedAt = new Date();
+        project.callStartedBy = userId;
+
+        // Add system message
+        project.messages.push({
+            senderId: userId,
+            senderType: 'system',
+            content: `🎥 Video call started by ${isOwner ? 'Project Owner' : 'Fworkk Admin'}`,
+            messageType: 'text',
+            createdAt: new Date()
+        });
+
+        await project.save();
+
+        if (req.io) {
+            req.io.to(`project_${projectId}`).emit("primeCallStarted", {
+                projectId,
+                callId,
+                startedBy: userId,
+                startedByName: req.user.username || req.user.Fullname || "Owner"
+            });
+            
+            // Sync messages/state
+            req.io.to(`project_${projectId}`).emit("receive_prime_message", project.messages[project.messages.length - 1]);
+        }
+
+        res.status(200).json({
+            success: true,
+            callId,
+            message: "Call started successfully"
+        });
+    } catch (error) {
+        console.error("Error starting prime call:", error);
+        res.status(500).json({ success: false, message: "Error starting call" });
+    }
+};
+
+export const endPrimeCall = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const userId = req.user.id;
+        const project = await FworkkPrimeModel.findById(projectId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        const isOwner = project.clientId.toString() === userId.toString();
+        const isAdmin = req.user.role === 'admin';
+        
+        if (!isOwner && !isAdmin) {
+            return res.status(403).json({ success: false, message: "Only owner or admin can end calls" });
+        }
+
+        project.activeCallId = null;
+        project.callStartedAt = null;
+        project.callStartedBy = null;
+        project.callJoinRequests = [];
+        await project.save();
+
+        if (req.io) {
+            req.io.to(`project_${projectId}`).emit("primeCallEnded", { projectId });
+        }
+
+        res.status(200).json({ success: true, message: "Call ended successfully" });
+    } catch (error) {
+        console.error("Error ending prime call:", error);
+        res.status(500).json({ success: false, message: "Error ending call" });
+    }
+};
+
+export const joinPrimeCall = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const userId = req.user.id;
+
+        const project = await FworkkPrimeModel.findById(projectId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        // Auto-approve owner and admin
+        const isOwner = project.clientId.toString() === userId.toString();
+        const isAdmin = req.user.role === 'admin';
+
+        if (!isOwner && !isAdmin) {
+            // Check if user is in team first
+            const isMember = project.selectedFreelancers.some(f => f.freelancerId?.toString() === userId.toString() && f.status === 'Accepted');
+            if (!isMember) return res.status(403).json({ success: false, message: "You are not a member of this project" });
+
+            // Allow direct join for team members
+        }
+
+        const token = streamClient.createToken(userId);
+        
+        res.status(200).json({
+            success: true,
+            token,
+            apiKey: process.env.STREAM_API_KEY,
+            appId: process.env.STREAM_APP_ID
+        });
+    } catch (error) {
+        console.error("Error joining prime call:", error);
+        res.status(500).json({ success: false, message: "Error getting token" });
+    }
+};
+
+export const requestPrimeCallJoin = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const userId = req.user.id;
+
+        const project = await FworkkPrimeModel.findById(projectId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        if (!project.activeCallId) return res.status(400).json({ success: false, message: "No active call" });
+
+        // Check if already requested
+        const existingRequest = (project.callJoinRequests || []).find(r => r.user?.toString() === userId.toString());
+        if (existingRequest) {
+            if (existingRequest.status === 'approved') return res.status(200).json({ success: true, message: "Already approved" });
+            if (existingRequest.status === 'pending') return res.status(200).json({ success: true, message: "Request already pending" });
+            // If denied, allow re-requesting? For now let's just update to pending
+            existingRequest.status = 'pending';
+            existingRequest.requestedAt = new Date();
+        } else {
+            project.callJoinRequests.push({ user: userId, status: 'pending' });
+        }
+
+        await project.save();
+
+        if (req.io) {
+            req.io.to(`project_${projectId}`).emit("primeCallJoinRequested", {
+                projectId,
+                userId,
+                userName: req.user.username || req.user.Fullname || "A member"
+            });
+        }
+
+        res.status(200).json({ success: true, message: "Join request sent" });
+    } catch (error) {
+        console.error("Error requesting call join:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+export const approvePrimeCallJoin = async (req, res) => {
+    try {
+        const { projectId, userId: targetUserId } = req.params;
+        const userId = req.user.id;
+
+        const project = await FworkkPrimeModel.findById(projectId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        const isOwner = project.clientId.toString() === userId.toString();
+        const isAdmin = req.user.role === 'admin';
+        if (!isOwner && !isAdmin) return res.status(403).json({ success: false, message: "Unauthorized" });
+
+        const request = (project.callJoinRequests || []).find(r => (r.user?._id || r.user)?.toString() === targetUserId.toString());
+        if (!request) return res.status(404).json({ success: false, message: "Request not found" });
+
+        request.status = 'approved';
+        await project.save();
+
+        if (req.io) {
+            req.io.to(`project_${projectId}`).emit("primeCallJoinApproved", {
+                projectId,
+                userId: targetUserId
+            });
+        }
+
+        res.status(200).json({ success: true, message: "Request approved" });
+    } catch (error) {
+        console.error("Error approving call join:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+export const denyPrimeCallJoin = async (req, res) => {
+    try {
+        const { projectId, userId: targetUserId } = req.params;
+        const userId = req.user.id;
+
+        const project = await FworkkPrimeModel.findById(projectId);
+        if (!project) return res.status(404).json({ success: false, message: "Project not found" });
+
+        const isOwner = project.clientId.toString() === userId.toString();
+        const isAdmin = req.user.role === 'admin';
+        if (!isOwner && !isAdmin) return res.status(403).json({ success: false, message: "Unauthorized" });
+
+        const request = (project.callJoinRequests || []).find(r => (r.user?._id || r.user)?.toString() === targetUserId.toString());
+        if (!request) return res.status(404).json({ success: false, message: "Request not found" });
+
+        request.status = 'denied';
+        await project.save();
+
+        if (req.io) {
+            req.io.to(`project_${projectId}`).emit("primeCallJoinDenied", {
+                projectId,
+                userId: targetUserId
+            });
+        }
+
+        res.status(200).json({ success: true, message: "Request denied" });
+    } catch (error) {
+        console.error("Error denying call join:", error);
         res.status(500).json({ success: false, message: "Server error" });
     }
 };

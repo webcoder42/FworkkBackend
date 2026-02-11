@@ -86,7 +86,8 @@ export const sendRegistrationVerification = async (req, res) => {
     try {
       await sendRegistrationVerificationEmail(email, verificationCode);
     } catch (emailError) {
-      logger.info(`🔑 REGISTRATION CODE FOR ${email}: ${verificationCode}`);
+      // Quietly fail or log a generic error that doesn't include the code
+      logger.error(`Registration email delivery failed for ${email}`);
     }
 
     return res.status(200).json({ success: true, message: "Registration verification code sent to your email" });
@@ -210,7 +211,8 @@ export const initiateLogin = async (req, res) => {
     try {
       await sendLoginVerificationEmail(user.email, verificationCode);
     } catch (e) {
-      console.log(`🔑 LOGIN CODE FOR ${user.email}: ${verificationCode}`);
+      // Quietly fail or log a generic error
+      logger.error(`Login verification email delivery failed for ${user.email}`);
     }
 
     return res.status(200).json({ success: true, message: "Login verification code sent to your email", email: user.email });
@@ -422,41 +424,132 @@ export const refreshAccessToken = async (req, res) => {
     return res.status(404).json({ success: false, message: "Disabled" });
 };
 
-export const connectGitHub = async (req, res) => {
-    try {
-        const { code } = req.body;
-        const resp = await axios.post("https://github.com/login/oauth/access_token", {
-            client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code
-        }, { headers: { Accept: "application/json" } });
-        const access_token = resp.data.access_token;
-        if (!access_token) return res.status(400).json({ success: false });
+    export const connectGitHub = async (req, res) => {
+        try {
+            const { code } = req.body;
+            const resp = await axios.post("https://github.com/login/oauth/access_token", {
+                client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code
+            }, { headers: { Accept: "application/json" } });
+            const access_token = resp.data.access_token;
+            if (!access_token) return res.status(400).json({ success: false });
+    
+            const profileResp = await axios.get("https://api.github.com/user", { headers: { Authorization: `Bearer ${access_token}` } });
+            await UserModel.findByIdAndUpdate(req.user.id, { githubAccessToken: access_token, githubId: profileResp.data.id.toString() });
+            const updatedUser = await UserModel.findById(req.user.id);
+            return res.status(200).json({ success: true, message: "GitHub connected", user: updatedUser });
+        } catch (e) { return res.status(500).json({ success: false }); }
+    };
 
-        const profileResp = await axios.get("https://api.github.com/user", { headers: { Authorization: `Bearer ${access_token}` } });
-        await UserModel.findByIdAndUpdate(req.user.id, { githubAccessToken: access_token, githubId: profileResp.data.id.toString() });
-        return res.status(200).json({ success: true, message: "GitHub connected" });
-    } catch (e) { return res.status(500).json({ success: false }); }
-};
+    export const getGitHubRepositoryTree = async (req, res) => {
+        try {
+            const { owner, repo } = req.params;
+            const user = await UserModel.findById(req.user.id);
+            if (!user?.githubAccessToken) return res.status(400).json({ success: false, message: "GitHub not connected" });
+            
+            // Get the default branch first
+            const repoInfo = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
+                 headers: { Authorization: `Bearer ${user.githubAccessToken}` }
+            });
+            const defaultBranch = repoInfo.data.default_branch;
+    
+            // Get the tree recursively
+            const resp = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/trees/${defaultBranch}?recursive=1`, {
+                headers: { Authorization: `Bearer ${user.githubAccessToken}` }
+            });
+            
+            return res.status(200).json({ success: true, tree: resp.data.tree });
+        } catch (e) {
+            console.error("GitHub Tree Error:", e); 
+            return res.status(500).json({ success: false, message: "Failed to fetch repository tree" }); 
+        }
+    };
+
+    export const getGitHubFileContent = async (req, res) => {
+        try {
+            const { repo, path } = req.query; // repo is "owner/repo"
+            const user = await UserModel.findById(req.user.id);
+            if (!user?.githubAccessToken) return res.status(400).json({ success: false, message: "GitHub not connected" });
+    
+            const resp = await axios.get(`https://api.github.com/repos/${repo}/contents/${path}`, {
+                headers: { Authorization: `Bearer ${user.githubAccessToken}`, Accept: "application/vnd.github.v3.raw" }
+            });
+            
+            // Return content as string
+            return res.status(200).json({ success: true, content: typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data) });
+        } catch (e) { 
+            console.error("GitHub File Error:", e);
+            return res.status(500).json({ success: false, message: "Failed to fetch file content" }); 
+        }
+    };
 
 export const linkedInRegister = async (req, res) => {
     try {
         const { code, role = "user", UserType = "freelancer", deviceId } = req.body;
         const accessToken = await linkedInService.getLinkedInAccessToken(code);
         const profile = await linkedInService.getLinkedInProfile(accessToken);
-        if (!profile.email) return res.status(400).json({ success: false });
+        
+        if (!profile.email) {
+            return res.status(400).json({ success: false, message: "No email provided from LinkedIn profile" });
+        }
 
-        const existing = await UserModel.findOne({ email: profile.email });
-        if (existing) return res.status(400).json({ success: false, message: "Exists" });
+        // Check if user already exists by email
+        let user = await UserModel.findOne({ email: profile.email });
+        
+        if (user) {
+            // User exists, update linkedinId if not set and login
+            if (!user.linkedinId) {
+                user.linkedinId = profile.linkedinId;
+                await user.save();
+            }
+            
+            const { accessToken: jwtToken } = setAuthCookies(res, user);
+            return res.status(200).json({ 
+                success: true, 
+                message: "Linked to existing account", 
+                token: jwtToken, 
+                user: {
+                    _id: user._id, Fullname: user.Fullname, email: user.email,
+                    username: user.username, role: user.role, UserType: user.UserType,
+                    isVerified: user.isVerified, uniqueId: user.uniqueId,
+                }
+            });
+        }
 
+        // New user registration
+        const username = profile.firstName.toLowerCase() + Math.floor(Math.random() * 10000);
         const newUser = new UserModel({
-            Fullname: `${profile.firstName} ${profile.lastName}`, email: profile.email,
-            username: profile.firstName.toLowerCase() + Math.floor(Math.random() * 10000),
-            linkedinId: profile.linkedinId, role, UserType, isVerified: true, deviceId,
-            uniqueId: generateUserUniqueId(), referralCode: generateReferralCode()
+            Fullname: `${profile.firstName} ${profile.lastName}`, 
+            email: profile.email,
+            username: username,
+            linkedinId: profile.linkedinId, 
+            role, 
+            UserType, 
+            isVerified: true, 
+            deviceId,
+            uniqueId: generateUserUniqueId(), 
+            referralCode: generateReferralCode(),
+            referralLink: generateReferralLink(generateReferralCode()),
+            accountStatus: "active",
+            availability: "online"
         });
+        
         await newUser.save();
+        try { await sendWelcomeEmail(newUser); } catch (e) { logger.error("Welcome email failed", e); }
+        
         const { accessToken: jwtToken } = setAuthCookies(res, newUser);
-        return res.status(201).json({ success: true, token: jwtToken, user: newUser });
-    } catch (e) { return res.status(500).json({ success: false }); }
+        return res.status(201).json({ 
+            success: true, 
+            token: jwtToken, 
+            user: {
+                _id: newUser._id, Fullname: newUser.Fullname, email: newUser.email,
+                username: newUser.username, role: newUser.role, UserType: newUser.UserType,
+                isVerified: newUser.isVerified, uniqueId: newUser.uniqueId,
+            }
+        });
+    } catch (e) { 
+        logger.error("LinkedIn registration error:", e);
+        return res.status(500).json({ success: false, message: e.message || "Internal server error" }); 
+    }
 };
 
 export const linkedInLogin = async (req, res) => {
@@ -464,15 +557,42 @@ export const linkedInLogin = async (req, res) => {
         const { code } = req.body;
         const accessToken = await linkedInService.getLinkedInAccessToken(code);
         const profile = await linkedInService.getLinkedInProfile(accessToken);
-        const user = await UserModel.findOne({ linkedinId: profile.linkedinId });
-        if (!user) return res.status(404).json({ success: false });
+        
+        // Find user by linkedinId or by email
+        let user = await UserModel.findOne({ 
+            $or: [
+                { linkedinId: profile.linkedinId },
+                { email: profile.email }
+            ]
+        });
+        
+        if (!user) {
+            return res.status(404).json({ success: false, message: "Account not found. Please register first." });
+        }
+
+        // Link LinkedIn ID if not already linked
+        if (!user.linkedinId) {
+            user.linkedinId = profile.linkedinId;
+        }
 
         user.lastLogin = new Date();
         user.availability = "online";
         await user.save();
+        
         const { accessToken: jwtToken } = setAuthCookies(res, user);
-        return res.status(200).json({ success: true, token: jwtToken, user: user });
-    } catch (e) { return res.status(500).json({ success: false }); }
+        return res.status(200).json({ 
+            success: true, 
+            token: jwtToken, 
+            user: {
+                _id: user._id, Fullname: user.Fullname, email: user.email,
+                username: user.username, role: user.role, UserType: user.UserType,
+                isVerified: user.isVerified, uniqueId: user.uniqueId,
+            }
+        });
+    } catch (e) { 
+        logger.error("LinkedIn login error:", e);
+        return res.status(500).json({ success: false, message: e.message || "Internal server error" }); 
+    }
 };
 
 export const logoutController = async (req, res) => {

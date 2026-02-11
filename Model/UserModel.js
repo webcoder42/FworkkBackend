@@ -68,6 +68,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    profileVideo: {
+      type: String,
+      default: "",
+    },
     UserType: {
       type: String,
       enum: ["freelancer", "client"],
@@ -137,6 +141,10 @@ const userSchema = new mongoose.Schema(
         amount: {
           type: Number,
           required: true,
+        },
+        reason: {
+          type: String,
+          default: "",
         },
         date: {
           type: Date,

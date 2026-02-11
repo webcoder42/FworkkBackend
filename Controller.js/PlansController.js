@@ -1,3 +1,4 @@
+import fetch from "node-fetch";
 import PlanSchemaModel from "../Model/PlanSchemaModel.js";
 
 // Create a new plan

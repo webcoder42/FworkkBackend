@@ -36,6 +36,8 @@ import {
   githubLogin,
   connectGitHub,
   getGitHubRepositories,
+  getGitHubRepositoryTree,
+  getGitHubFileContent,
   linkedInRegister,
   linkedInLogin,
   getTopFreelancers,
@@ -91,6 +93,8 @@ router.post("/github/register", githubRegister);
 router.post("/github/login", githubLogin);
 router.post("/github/connect", requireSignIn, connectGitHub);
 router.get("/github/repositories", requireSignIn, getGitHubRepositories);
+router.get("/github/repository/:owner/:repo/tree", requireSignIn, getGitHubRepositoryTree);
+router.get("/github/file", requireSignIn, getGitHubFileContent);
 /* 
 =============================================
 GOOGLE AUTH ROUTE
@@ -114,7 +118,7 @@ router.post("/linkedin/login", linkedInLogin);
 UTILITY ROUTES
 =========================================s====
 */
-router.get("/check-username",cacheMiddleware('checkusername ' ,10), checkUsernameAvailability);
+router.get("/check-username",cacheMiddleware(10, 'checkusername '), checkUsernameAvailability);
 router.get("/search", requireSignIn, searchUsers);
 
 /* 
@@ -137,13 +141,14 @@ User Profile Route
 =============================================
 */
 
-router.get("/profile", requireSignIn, cacheMiddleware(req => `profile:${req.user.id}`, 10), getUserProfile);
+router.get("/profile", requireSignIn, cacheMiddleware(10, req => `profile:${req.user.id}`), getUserProfile);
 router.get("/security", requireSignIn, getUserSecurity);
 router.post("/security/verify", requireSignIn, verifyUserSecurity);
 import chatUpload from "../middleware/chatUpload.js";
-router.get("/profile-completion",cacheMiddleware('profile-completetion', 20), requireSignIn, getProfileCompletion);
+router.get("/profile-completion",cacheMiddleware(20, 'profile-completetion'), requireSignIn, getProfileCompletion);
 router.put("/profile", requireSignIn, chatUpload.fields([
   { name: "profileImage", maxCount: 1 },
+  { name: "profileVideo", maxCount: 1 },
   { name: "portfolioImages", maxCount: 10 }
 ]), updateUserProfile);
 router.put("/password", requireSignIn, updatePassword);
@@ -152,7 +157,7 @@ router.put("/role", requireSignIn, changeUserRole);
 // GET all users (admin only)
 router.get(
   "/get-all",
-  cacheMiddleware("all-users", 60),
+  cacheMiddleware(60, "all-users"),
   requireSignIn,
   isAdmin,
   getAllUsers
@@ -167,13 +172,13 @@ router.put("/update/:id", requireSignIn, isAdmin, updateUserById);
 // DELETE user
 router.delete("/delete/:id", requireSignIn, isAdmin, deleteUserById);
 
-router.get("/user/details/:id", requireSignIn, isAdmin,cacheMiddleware('user-detail' , 60),  getUserCompleteDetails);
+router.get("/user/details/:id", requireSignIn, isAdmin,cacheMiddleware(60, 'user-detail'),  getUserCompleteDetails);
 
 // Get public user profile (for clients to view applicant profiles)
-router.get("/public-profile/:id", requireSignIn,cacheMiddleware('public-profile' , 60), getPublicUserProfile);
+router.get("/public-profile/:id", requireSignIn,cacheMiddleware(60, 'public-profile'), getPublicUserProfile);
 
 // Get user projects and details
-router.get("/user-projects/:userId", requireSignIn, isAdmin,cacheMiddleware('user-project' , 60), getUserProjects);
+router.get("/user-projects/:userId", requireSignIn, isAdmin,cacheMiddleware(60, 'user-project'), getUserProjects);
 
 /* 
 =============================================
@@ -184,17 +189,17 @@ router.post("/forgot-password/request", requestPasswordReset);
 router.get("/forgot-password/verify", verifyResetToken);
 router.post("/forgot-password/reset", resetPassword);
 
-router.get("/total-add-fund", requireSignIn, isAdmin, cacheMiddleware('total-add-fund' , 60), getTotalAddFundAmount);
+router.get("/total-add-fund", requireSignIn, isAdmin, cacheMiddleware(60, 'total-add-fund'), getTotalAddFundAmount);
 router.get(
   "/monthly-add-fund",
   requireSignIn,
   isAdmin,
-  cacheMiddleware('monthly-add-fund' , 60),
+  cacheMiddleware(60, 'monthly-add-fund'),
   getMonthlyAddFundAmounts
 );
 
 // Get user earning logs
-router.get("/earning-logs", requireSignIn,cacheMiddleware('earning-log' , 60),  getUserEarningLogs);
+router.get("/earning-logs", requireSignIn,cacheMiddleware(60, 'earning-log'),  getUserEarningLogs);
 
 // Get Top Freelancers
 router.get("/top-freelancers", getTopFreelancers);

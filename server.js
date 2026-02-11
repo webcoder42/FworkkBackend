@@ -74,7 +74,7 @@ app.use(cors({
     if (!origin || uniqueAllowedOrigins.includes(origin) || uniqueAllowedOrigins.includes(origin + '/')) {
       callback(null, true);
     } else {
-      console.error(`❌ Express CORS blocked for origin: ${origin}`);
+      logger.error(`❌ Express CORS blocked for origin: ${origin}`);
       callback(new Error("Not allowed by CORS"));
     }
   },
@@ -82,8 +82,8 @@ app.use(cors({
 }));
 
 app.use(apiLimiter);
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: "200mb" }));
+app.use(express.urlencoded({ extended: true, limit: "200mb" }));
 // app.use(cookieParser()); // Disabled to avoid third-party cookie issues on mobile
 app.use(helmet());
 app.use(hpp());
@@ -127,9 +127,14 @@ const startServer = async () => {
   try {
     await connectDB();
     
-    // Initialize Schedulers
-    runScheduler(); 
-    initializeCronJobs();
+    // Initialize Schedulers (Only on the first instance in cluster mode)
+    if (process.env.NODE_APP_INSTANCE === undefined || process.env.NODE_APP_INSTANCE === '0') {
+      runScheduler(); 
+      initializeCronJobs();
+      logger.info("🕒 Schedulers initialized on primary instance.");
+    } else {
+      logger.info(`⏩ Schedulers skipped for instance ${process.env.NODE_APP_INSTANCE || 'n/a'}`);
+    }
 
     server.listen(PORT, () =>
       logger.info(`🚀 Server running in ${process.env.NODE_ENV || 'development'} mode on Port ${PORT}`)

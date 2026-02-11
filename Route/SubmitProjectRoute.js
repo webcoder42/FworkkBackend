@@ -22,7 +22,7 @@ router.post("/projects/:projectId", requireSignIn, submitProject);
 router.get(
   "/projects/:projectId",
   requireSignIn,
-  cacheMiddleware(req => `submission:${req.user.id}:${req.params.projectId}`, 20),
+  cacheMiddleware(20, req => `submission:${req.user.id}:${req.params.projectId}`),
   getSubmissionDetails
 );
 
@@ -40,7 +40,7 @@ router.put("/project-update/:id", requireSignIn, updateSubmissionStatus);
 router.get(
   "/client/submission/:projectId",
   requireSignIn,
-  cacheMiddleware(req => `client-submission:${req.user.id}:${req.params.projectId}`, 20),
+  cacheMiddleware(20, req => `client-submission:${req.user.id}:${req.params.projectId}`),
   getProjectSubmissionForClient
 );
 
@@ -48,21 +48,21 @@ router.get(
 router.get(
   "/project/:projectId",
   requireSignIn,
-  cacheMiddleware(req => `project-submissions:${req.user.id}:${req.params.projectId}`, 30),
+  cacheMiddleware(30, req => `project-submissions:${req.user.id}:${req.params.projectId}`),
   getAllProjectSubmissionsForClient
 );
 
 // User approved submissions
 router.get(
   "/approved/:userId",
-  cacheMiddleware(req => `approved:${req.params.userId}`, 20),
+  cacheMiddleware(20, req => `approved:${req.params.userId}`),
   checkUserApprovedSubmissions
 );
 
 // User in-progress submissions
 router.get(
   "/inprogress/:userId",
-  cacheMiddleware(req => `inprogress:${req.params.userId}`, 10),
+  cacheMiddleware(10, req => `inprogress:${req.params.userId}`),
   checkUserInProgressSubmissions
 );
 
@@ -70,7 +70,7 @@ router.get(
 router.get(
   "/client/all-submissions",
   requireSignIn,
-  cacheMiddleware(req => `client-notifications:${req.user.id}`, 10),
+  cacheMiddleware(10, req => `client-notifications:${req.user.id}`),
   getClientWorkSubmissions
 );
 

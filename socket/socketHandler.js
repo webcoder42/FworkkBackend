@@ -2,6 +2,7 @@ import { Server } from "socket.io";
 import CallModel from "../Model/CallModel.js";
 import startAIModerationScheduler from '../utils/AIModerationScheduler.js';
 import jwt from "jsonwebtoken";
+import TeamHub from "../Model/TeamHubModel.js";
 import cookie from "cookie";
 
 const onlineUsers = {};
@@ -66,6 +67,13 @@ export const setupSocket = (server, uniqueAllowedOrigins) => {
       onlineUsers[userId] = socket.id;
       console.log(`📱 User registered (Auth): ${userId} -> ${socket.id}`);
       socket.broadcast.emit("userOnline", { userId, socketId: socket.id });
+
+      // Join all user's teams for background notifications
+      TeamHub.find({ "members.user": userId }).select("_id").then(teams => {
+        teams.forEach(team => {
+          socket.join(`team_${team._id}`);
+        });
+      }).catch(err => console.error("Error joining teams on connect:", err));
     });
 
     // Handle Call
@@ -221,6 +229,31 @@ export const setupSocket = (server, uniqueAllowedOrigins) => {
 
     socket.on("leaveTeam", (teamId) => {
       socket.leave(`team_${teamId}`);
+    });
+
+    // Team Calls Join Request
+    socket.on("requestJoinTeamCall", (data) => {
+        const { teamId, ownerId, requestorId, requestorName, requestorPhoto } = data;
+        const ownerSocketId = onlineUsers[String(ownerId)];
+        if (ownerSocketId) {
+            io.to(ownerSocketId).emit("joinTeamCallRequest", {
+                teamId,
+                requestorId,
+                requestorName,
+                requestorPhoto,
+                socketId: socket.id
+            });
+        }
+    });
+
+    socket.on("approveJoinTeamCall", (data) => {
+        const { targetSocketId, teamId, callId } = data;
+        io.to(targetSocketId).emit("joinTeamCallApproved", { teamId, callId });
+    });
+
+    socket.on("rejectJoinTeamCall", (data) => {
+        const { targetSocketId, teamId, reason } = data;
+        io.to(targetSocketId).emit("joinTeamCallRejected", { teamId, reason: reason || "Owner declined your request" });
     });
 
     // Project Chats

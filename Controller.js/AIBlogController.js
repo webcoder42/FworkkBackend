@@ -1,6 +1,7 @@
 // controllers/AIBlogController.js
 // AI-powered blog generation using Groq API
 
+import fetch from "node-fetch";
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -40,52 +41,50 @@ export const generateAIBlog = async (req, res) => {
       console.error("Error reading platform info:", err);
     }
 
+    // Determine a rotating style/tone for variety
+    const styles = ["Practical & Educational", "Motivational & Inspiring", "Trend-Focused & Analytical", "Success Story Centric", "Controversial & Thought-Provoking", "Step-by-Step Guide Style"];
+    const currentStyle = styles[new Date().getDate() % styles.length];
+
     // Create the prompt for blog generation
-    const prompt = `You are a professional tech blogger writing for the "Fworkk" freelancing platform. 
+    const prompt = `You are a professional senior tech blogger and SEO expert writing for the "Fworkk" freelancing platform. 
     
-    Here is the official context about the Fworkk platform. Use this information to make the blog specific and accurate (do not hallucinate features we don't have):
+    Current Official Platform Context:
     ${platformContext}
 
-    Write a comprehensive, SEO-optimized blog post about "${subcategory}" in the "${category}" category.
+    TASK: Write a comprehensive, SEO-optimized blog post about "${subcategory}" in the "${category}" category.
 
-    IMPORTANT: The Title MUST be unique, catchy, and creative. logic:
-    - BANNED TITLES: Do NOT start with "Unlocking the Power of", "Mastering", "Introduction to", or "The Ultimate Guide".
-    - STYLE: Use headlines like "How X can double your income", "Why Smart Clients are choosing Y", "5 Hidden Secrets of Z".
-    - Make it sound human and exciting.
+    CRITICAL TITLE RULES:
+    1. The Title MUST explicitly include the word "Fworkk" (e.g., "Scaling your Fworkk career", "How Fworkk is revolutionizing ${subcategory}").
+    2. The Title MUST be unique, catchy, and creative.
+    3. BANNED STARTERS: Do NOT start with "Unlocking the Power of", "Mastering", "Introduction to", or "The Ultimate Guide".
+    4. STYLE: Use headlines like "How ${subcategory} on Fworkk can double your income", "Why Smart Clients are choosing Fworkk for ${category}", "5 Hidden Fworkk Secrets of ${subcategory}".
+    5. Ensure the title is different from any generic industry blog.
 
-The response must be in JSON format with the following structure:
+    CONTENT REQUIREMENTS:
+    1. The blog should be 800-1200 words.
+    2. Tone/Style: ${currentStyle}. Ensure the voice is professional yet matches this specific style.
+    3. Include at least 3 heading1, 3 heading2, and 2 heading3 elements.
+    4. Include at least 6-8 detailed paragraphs.
+    5. Include at least 2 image blocks within the content. Use the 'value' field to provide a descriptive search term.
+    6. IMAGE VARIETY: Ensure image search terms are specific and visually distinct (e.g., "minimalist workspace with coffee", "developer hands on mechanical keyboard", "dynamic team meeting in modern office").
+    7. Include 1-2 relevant quotes.
+    8. Focus on current ${new Date().getFullYear()} trends and practical Fworkk-specific advice.
+    9. Tags should be high-volume SEO keywords.
 
-The response must be in JSON format with the following structure:
-{
-  "title": "An engaging, SEO-friendly title for the blog post",
-  "thumbnailSearchTerm": "A search term for finding a relevant thumbnail image (e.g., 'react development coding')",
-  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "content": [
-    {"type": "heading1", "value": "Main Section Heading"},
-    {"type": "paragraph", "value": "Introductory paragraph..."},
-    {"type": "image", "value": "A descriptive search term for an image (e.g., 'coding laptop')"},
-    {"type": "heading2", "value": "Sub Section Heading"},
-    {"type": "paragraph", "value": "Detailed content..."},
-    {"type": "heading3", "value": "Minor Heading"},
-    {"type": "paragraph", "value": "More details..."},
-    {"type": "image", "value": "Another relevant search term"},
-    {"type": "quote", "value": "An inspiring or relevant quote..."},
-    {"type": "paragraph", "value": "Conclusion paragraph..."}
-  ]
-}
+    JSON STRUCTURE:
+    {
+      "title": "...",
+      "thumbnailSearchTerm": "Specific Unsplash search query",
+      "tags": ["..."],
+      "content": [
+        {"type": "heading1", "value": "..."},
+        {"type": "paragraph", "value": "..."},
+        {"type": "image", "value": "Specific search query"},
+        ...
+      ]
+    }
 
-Requirements:
-1. The blog should be 800-1200 words
-2. Include at least 3 heading1, 3 heading2, and 2 heading3 elements
-3. Include at least 6-8 detailed paragraphs
-4. Include at least 2 image blocks within the content. Use the 'value' field to provide a descriptive search term for the image. IMPORTANT: Ensure each image search term is visually distinct (e.g., "coding close up", "office team", "whiteboard diagram") to avoid repetition.
-5. Include 1-2 relevant quotes
-6. Make it informative, engaging, and professional
-7. Focus on current trends and best practices in ${subcategory}
-8. Include practical tips and actionable advice
-9. Tags should be relevant keywords for SEO
-
-Return ONLY valid JSON, no additional text or markdown.`;
+    Return ONLY valid JSON. No markdown formatting.`;
 
     // Call Groq API
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -161,8 +160,9 @@ Return ONLY valid JSON, no additional text or markdown.`;
     const fetchDistinctImage = async (searchTerm, category, subcategory) => {
       try {
         const query = encodeURIComponent(searchTerm);
+        const randomPage = Math.floor(Math.random() * 5) + 1;
         const unsplashResponse = await fetch(
-          `https://api.unsplash.com/search/photos?query=${query}&per_page=15&orientation=landscape`,
+          `https://api.unsplash.com/search/photos?query=${query}&per_page=15&page=${randomPage}&orientation=landscape`,
           {
             headers: {
               "Authorization": `Client-ID ${process.env.UNSPLASH_ACCESS_KEY || "demo"}`
@@ -269,49 +269,49 @@ export const generateBlogPostForScheduler = async (category, subcategory) => {
       console.error("Error reading platform info:", err);
     }
 
-    const prompt = `You are a professional tech blogger writing for the "Fworkk" freelancing platform. 
+    // Determine a rotating style/tone for variety
+    const styles = ["Practical & Educational", "Motivational & Inspiring", "Trend-Focused & Analytical", "Success Story Centric", "Controversial & Thought-Provoking", "Step-by-Step Guide Style"];
+    const currentStyle = styles[new Date().getDate() % styles.length];
+
+    const prompt = `You are a professional senior tech blogger and SEO expert writing for the "Fworkk" freelancing platform. 
     
-    Here is the official context about the Fworkk platform. Use this information to make the blog specific and accurate (do not hallucinate features we don't have):
+    Current Official Platform Context:
     ${platformContext}
 
-    Write a comprehensive, SEO-optimized blog post about "${subcategory}" in the "${category}" category.
+    TASK: Write a comprehensive, SEO-optimized daily blog post about "${subcategory}" in the "${category}" category.
 
-    IMPORTANT: The Title MUST be unique, catchy, and creative. logic:
-    - BANNED TITLES: Do NOT start with "Unlocking the Power of", "Mastering", "Introduction to", or "The Ultimate Guide".
-    - STYLE: Use headlines like "How X can double your income", "Why Smart Clients are choosing Y", "5 Hidden Secrets of Z".
-    - Make it sound human and exciting.
+    CRITICAL TITLE RULES:
+    1. The Title MUST explicitly include the word "Fworkk" (e.g., "The Fworkk Guide to ${subcategory}", "How Fworkk helps you master ${category}").
+    2. The Title MUST be unique, catchy, and creative.
+    3. BANNED STARTERS: Do NOT start with "Unlocking the Power of", "Mastering", "Introduction to", or "The Ultimate Guide".
+    4. STYLE: Use varied hooks like "${subcategory} Tips for Fworkk Pros", "Why Fworkk is the best for ${subcategory}", "The future of ${category} on Fworkk".
+    5. Ensure the title is different from any previous similar posts.
 
-The response must be in JSON format with the following structure:
-{
-  "title": "An engaging, SEO-friendly title for the blog post",
-  "thumbnailSearchTerm": "A search term for finding a relevant thumbnail image (e.g., 'react development coding')",
-  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "content": [
-    {"type": "heading1", "value": "Main Section Heading"},
-    {"type": "paragraph", "value": "Introductory paragraph..."},
-    {"type": "image", "value": "A descriptive search term for an image (e.g., 'coding laptop')"},
-    {"type": "heading2", "value": "Sub Section Heading"},
-    {"type": "paragraph", "value": "Detailed content..."},
-    {"type": "heading3", "value": "Minor Heading"},
-    {"type": "paragraph", "value": "More details..."},
-    {"type": "image", "value": "Another relevant search term"},
-    {"type": "quote", "value": "An inspiring or relevant quote..."},
-    {"type": "paragraph", "value": "Conclusion paragraph..."}
-  ]
-}
+    CONTENT REQUIREMENTS:
+    1. The blog should be 800-1200 words.
+    2. Tone/Style: ${currentStyle}. Ensure the voice is professional yet matches this specific style.
+    3. Include at least 3 heading1, 3 heading2, and 2 heading3 elements.
+    4. Include at least 6-8 detailed paragraphs.
+    5. Include at least 2 image blocks within the content. Use the 'value' field to provide a descriptive search term.
+    6. IMAGE VARIETY: Generate highly specific and diverse image search terms (e.g., "modern minimalist tech desk", "people collaborating in a bright workspace", "close up of a high-tech screen").
+    7. Include 1-2 relevant quotes.
+    8. Focus on practical insights and how they apply specifically to users on the Fworkk platform.
+    9. Tags should be relevant SEO keywords.
 
-Requirements:
-1. The blog should be 800-1200 words
-2. Include at least 3 heading1, 3 heading2, and 2 heading3 elements
-3. Include at least 6-8 detailed paragraphs
-4. Include at least 2 image blocks within the content. Use the 'value' field to provide a descriptive search term for the image. IMPORTANT: Ensure each image search term is visually distinct (e.g., "coding close up", "office team", "whiteboard diagram") to avoid repetition.
-5. Include 1-2 relevant quotes
-6. Make it informative, engaging, and professional
-7. Focus on current trends and best practices in ${subcategory}
-8. Include practical tips and actionable advice
-9. Tags should be relevant keywords for SEO
+    JSON STRUCTURE:
+    {
+      "title": "...",
+      "thumbnailSearchTerm": "Specific Unsplash search query",
+      "tags": ["..."],
+      "content": [
+        {"type": "heading1", "value": "..."},
+        {"type": "paragraph", "value": "..."},
+        {"type": "image", "value": "Specific search query"},
+        ...
+      ]
+    }
 
-Return ONLY valid JSON, no additional text or markdown.`;
+    Return ONLY valid JSON. No markdown formatting.`;
 
     // Call Groq API
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -367,8 +367,9 @@ Return ONLY valid JSON, no additional text or markdown.`;
     const fetchDistinctImage = async (searchTerm, category, subcategory) => {
       try {
         const query = encodeURIComponent(searchTerm);
+        const randomPage = Math.floor(Math.random() * 5) + 1;
         const unsplashResponse = await fetch(
-          `https://api.unsplash.com/search/photos?query=${query}&per_page=15&orientation=landscape`,
+          `https://api.unsplash.com/search/photos?query=${query}&per_page=15&page=${randomPage}&orientation=landscape`,
           { headers: { "Authorization": `Client-ID ${process.env.UNSPLASH_ACCESS_KEY || "demo"}` } }
         );
 
@@ -416,7 +417,7 @@ Return ONLY valid JSON, no additional text or markdown.`;
       tags: blogData.tags || [category, subcategory],
       content: blogData.content,
       layoutType: "standard",
-      author: "BiZZy AI Team"
+      author: "Fworkk AI Team"
     });
 
     await newBlog.save();

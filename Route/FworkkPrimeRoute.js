@@ -28,7 +28,14 @@ import {
     sendTaskReminder, 
     getClientPrimeNotifications, 
     addFundsToProject,
-    triggerAutoHire
+    triggerAutoHire,
+    getFreelancerPrimeHistory,
+    startPrimeCall,
+    endPrimeCall,
+    joinPrimeCall,
+    requestPrimeCallJoin,
+    approvePrimeCallJoin,
+    denyPrimeCallJoin
 } from '../Controller.js/FworkkPrimeController.js';
 
 
@@ -43,6 +50,7 @@ router.get('/my-projects', requireSignIn, getMyProjectRequests);
 router.get('/freelancers-for-hiring', requireSignIn, getFreelancersForHiring);
 router.get('/invitations', requireSignIn, getPrimeInvitations);
 router.get('/accepted-projects', requireSignIn, getAcceptedPrimeProjects);
+router.get('/freelancer-history/:freelancerId', requireSignIn, getFreelancerPrimeHistory);
 router.post('/respond-invitation', requireSignIn, respondToInvitation);
 router.put('/launch/:id', requireSignIn, launchPrimeProject);
 router.post('/add-payout', requireSignIn, addPayoutRecord);
@@ -61,6 +69,12 @@ router.get('/client-task-notifications', requireSignIn, getClientPrimeNotificati
 router.post('/add-funds', requireSignIn, addFundsToProject);
 router.post('/email/reminder', requireSignIn, sendTaskReminder);
 router.post('/:id/auto-hire', requireSignIn, triggerAutoHire);
+router.post('/call/start/:projectId', requireSignIn, startPrimeCall);
+router.post('/call/end/:projectId', requireSignIn, endPrimeCall);
+router.get('/call/token/:projectId', requireSignIn, joinPrimeCall);
+router.post('/call/request-join/:projectId', requireSignIn, requestPrimeCallJoin);
+router.put('/call/approve-join/:projectId/:userId', requireSignIn, approvePrimeCallJoin);
+router.put('/call/deny-join/:projectId/:userId', requireSignIn, denyPrimeCallJoin);
 
 // Admin routes
 router.get('/all-requests', requireSignIn, isAdmin, getAllProjectRequests);

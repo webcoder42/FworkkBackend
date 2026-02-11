@@ -15,8 +15,8 @@ import { cacheMiddleware } from "../middleware/cacheMiddleware.js";
 const router = express.Router();
 
 // Public routes
-router.get("/all",cacheMiddleware('blog' , 86400), getAllBlogs);
-router.get("/get/:id",cacheMiddleware('blogdetail' , 604800), getBlogById);
+router.get("/all", getAllBlogs);
+router.get("/get/:id", cacheMiddleware(604800, 'blogdetail'), getBlogById);
 
 // Admin only routes
 router.post("/create", requireSignIn, isAdmin, createBlog);

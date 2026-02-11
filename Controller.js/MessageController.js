@@ -306,9 +306,9 @@ export const getSendersToUser = async (req, res) => {
         // Skip this message if sender or receiver is missing
         return;
       }
-      // Determine if the other user is sender or receiver
+      // Determine if the other user is sender or receiver - Robust comparison
       const otherUser =
-        msg.sender._id.toString() === userId ? msg.receiver : msg.sender;
+        String(msg.sender._id) === String(userId) ? msg.receiver : msg.sender;
       if (!otherUser || !otherUser._id) {
         // Skip if otherUser is missing
         return;

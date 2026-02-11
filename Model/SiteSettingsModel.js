@@ -73,6 +73,10 @@ const siteSettingsSchema = new mongoose.Schema({
     type: Number,
     default: 500, // Minimum amount for cashout
   },
+  aiAutoBlog: {
+    type: Boolean,
+    default: false,
+  },
   // You can add more fields here for future dynamic settings
   updatedAt: {
     type: Date,

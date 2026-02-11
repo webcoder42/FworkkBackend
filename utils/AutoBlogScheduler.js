@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateBlogPostForScheduler } from '../Controller.js/AIBlogController.js';
+import SiteSettings from '../Model/SiteSettingsModel.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,9 +19,15 @@ if (!fs.existsSync(STATE_PATH)) {
 const runScheduler = () => {
   // Schedule task for 9:30 AM daily
   cron.schedule('30 9 * * *', async () => {
-    console.log('⏰ Running Auto-Blog Scheduler at 9:30 AM...');
-
     try {
+      // 0. Check if AI Auto-Blog is enabled in Site Settings
+      const settings = await SiteSettings.findOne();
+      if (!settings || !settings.aiAutoBlog) {
+        console.log('⏭️ Auto-Blog Scheduler skipped: AI Auto-Blog is DISABLED in settings.');
+        return;
+      }
+
+      console.log('⏰ Running Auto-Blog Scheduler at 9:30 AM...');
       // 1. Read Data
       const categoriesRaw = fs.readFileSync(CATEGORIES_PATH, 'utf8');
       const categories = JSON.parse(categoriesRaw);

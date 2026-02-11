@@ -1,10 +1,9 @@
 import QuizAttempt from "../Model/QuizModel.js";
-import OpenAI from "openai";
+import Groq from "groq-sdk";
 
 // ✅ Groq API client setup
-const openai = new OpenAI({
+const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1", // Groq endpoint
 });
 
 // ✅ Controller: Start AI Quiz
@@ -51,7 +50,7 @@ Return ONLY a pure JSON array of 10 such question objects. No explanations, no t
 
   try {
     // ✅ Request to Groq AI
-    const response = await openai.chat.completions.create({
+    const response = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,

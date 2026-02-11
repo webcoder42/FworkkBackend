@@ -2,6 +2,7 @@ import ProjectPurchase from "../Model/ProjectPurchaseModel.js";
 import ProjectMarketplace from "../Model/ProjectMarketplaceModel.js";
 import User from "../Model/UserModel.js";
 import Stripe from "stripe";
+import fetch from "node-fetch";
 import { getPayPalAccessToken } from "./PlanPurchaseController.js";
 import {
   sendPaymentSuccessEmailToBuyer,
@@ -832,22 +833,18 @@ export const createPayPalProjectPurchase = async (req, res) => {
         // Get buyer details for email
         const buyer = await User.findById(buyerId);
 
-        // Send email notifications
-        try {
-          await sendPaymentSuccessEmailToBuyer(
-            savedPurchase,
-            buyer,
-            savedPurchase.project
-          );
-          await sendPaymentNotificationToSeller(
-            savedPurchase,
-            savedPurchase.seller,
-            savedPurchase.project,
-            buyer
-          );
-        } catch (emailError) {
-          console.error("Error sending email notifications:", emailError);
-        }
+        // Send email notifications (non-blocking)
+        sendPaymentSuccessEmailToBuyer(
+          savedPurchase,
+          buyer,
+          savedPurchase.project
+        ).catch(err => console.error("Buyer email error:", err));
+        sendPaymentNotificationToSeller(
+          savedPurchase,
+          savedPurchase.seller,
+          savedPurchase.project,
+          buyer
+        ).catch(err => console.error("Seller email error:", err));
 
         res.status(201).json({
           success: true,

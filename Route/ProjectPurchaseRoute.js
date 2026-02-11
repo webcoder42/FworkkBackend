@@ -84,16 +84,16 @@ router.post("/rate-order", rateDeliveredOrder);
 router.put("/purchase/:purchaseId/cancel", cancelPurchase);
 
 // Check user orders (for debugging)
-router.get("/check-user-orders",cacheMiddleware('check-user-order' , 20), checkUserOrders);
+router.get("/check-user-orders",cacheMiddleware(20, 'check-user-order'), checkUserOrders);
 
 // Create test order (for debugging)
 router.post("/create-test-order", createTestOrder);
 
 // Check user projects (for debugging)
-router.get("/check-user-projects",cacheMiddleware('check-user-project' , 10), checkUserProjects);
+router.get("/check-user-projects",cacheMiddleware(10, 'check-user-project'), checkUserProjects);
 
 // Get all user orders (both as buyer and seller)
-router.get("/all-user-orders",cacheMiddleware('all-user-order' , 20), getAllUserOrders);
+router.get("/all-user-orders",cacheMiddleware(20, 'all-user-order'), getAllUserOrders);
 
 // Submit project for review
 router.post("/purchase/:purchaseId/submit", submitProject);
@@ -105,8 +105,8 @@ router.post("/purchase/:purchaseId/submit", submitProject);
 // Admin status update route: /admin/purchase/:purchaseId/status
 // Admin review approve route: /admin/reviews/:reviewId/approve
 // Admin review reject route: /admin/reviews/:reviewId/reject
-router.get("/admin/orders", requireSignIn, isAdmin, cacheMiddleware('admin-show-order' , 20), getAllOrdersForAdmin);
-router.get("/admin/reviews", requireSignIn, isAdmin,cacheMiddleware('admin-review' , 30), getAllReviewsForAdmin);
+router.get("/admin/orders", requireSignIn, isAdmin, cacheMiddleware(20, 'admin-show-order'), getAllOrdersForAdmin);
+router.get("/admin/reviews", requireSignIn, isAdmin,cacheMiddleware(30, 'admin-review'), getAllReviewsForAdmin);
 router.put(
   "/admin/purchase/:purchaseId/status",
   requireSignIn,

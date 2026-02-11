@@ -94,6 +94,17 @@ export const updateUserProfile = async (req, res) => {
         updates.profileImage = result.url;
     }
 
+    // Handle Profile Video Upload
+    const profileVideoFile = req.files?.profileVideo?.[0];
+    if (profileVideoFile) {
+        const result = await uploadImageToCloudinary({
+            buffer: profileVideoFile.buffer,
+            originalname: profileVideoFile.originalname,
+            mimetype: profileVideoFile.mimetype
+        }, "profile-videos");
+        updates.profileVideo = result.url;
+    }
+
     // Handle Portfolio Image Uploads
     if (updates.portfolio && Array.isArray(updates.portfolio)) {
         const portfolioFiles = req.files?.portfolioImages || [];
@@ -115,13 +126,28 @@ export const updateUserProfile = async (req, res) => {
     // Restricted fields
     delete updates.password; delete updates.role; delete updates.accountStatus;
 
-    const user = await UserModel.findByIdAndUpdate(userId, updates, { new: true });
-    await redisClient.del(`profile:${userId}`);
-
-    return res.status(200).json({ success: true, user });
+    try {
+        const user = await UserModel.findByIdAndUpdate(userId, updates, { new: true, runValidators: true });
+        await redisClient.del(`profile:${userId}`);
+        return res.status(200).json({ success: true, user });
+    } catch (dbError) {
+        if (dbError.code === 11000) {
+            const field = Object.keys(dbError.keyPattern || {})[0] || "field";
+            return res.status(400).json({ 
+                success: false, 
+                message: `${field.charAt(0).toUpperCase() + field.slice(1)} already exists. Please choose another one.` 
+            });
+        }
+        throw dbError; // Re-throw to be caught by the outer catch
+    }
   } catch (error) {
-    console.error("Update error:", error);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    if (error.code !== 11000) {
+        console.error("Update error:", error);
+    }
+    return res.status(error.status || 500).json({ 
+        success: false, 
+        message: error.message || "Internal server error" 
+    });
   }
 };
 
@@ -165,9 +191,15 @@ export const getUserSecurity = async (req, res) => {
 
 export const verifyUserSecurity = async (req, res) => {
     const { answer } = req.body;
+    if (!answer) return res.status(400).json({ success: false, message: "Answer is required" });
+    
     const user = await UserModel.findById(req.user.id).select("securityAnswer");
-    if (user.securityAnswer === answer) return res.status(200).json({ success: true });
-    return res.status(401).json({ success: false });
+    if (!user || !user.securityAnswer) return res.status(404).json({ success: false, message: "Security answer not set" });
+
+    if (user.securityAnswer.trim().toLowerCase() === answer.trim().toLowerCase()) {
+        return res.status(200).json({ success: true });
+    }
+    return res.status(400).json({ success: false, message: "Incorrect security answer" });
 };
 
 export const sendAccountVerification = async (req, res) => {

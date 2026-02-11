@@ -44,13 +44,13 @@ router.get("/daily-updates/:projectId", requireSignIn, getDailyWorkUpdates);
 router.post("/create", requireSignIn, createProjectLimiter, createJobPost);
 
 // Get all job posts (public route)
-router.get("/all",cacheMiddleware('get-all-jobs' , 10),  getAllJobPosts);
+router.get("/all",cacheMiddleware(10, 'get-all-jobs'),  getAllJobPosts);
 
 // Get job posts by logged-in user (protected route)
 router.get("/my-jobs", requireSignIn, getMyJobPosts);
 
 // Get latest job posts (public route)
-router.get("/latest-jobs",cacheMiddleware('latest-job' , 10), getLatestJobPosts);
+router.get("/latest-jobs",cacheMiddleware(10, 'latest-job'), getLatestJobPosts);
 
 // Get single job post by ID (public route)
 router.get("/:id", getJobPostById);
@@ -71,7 +71,7 @@ router.get(
 );
 
 // Search job posts with filters (public route)
-router.get("/search/all",cacheMiddleware('search-job', 10), searchJobPosts);
+router.get("/search/all",cacheMiddleware(10, 'search-job'), searchJobPosts);
 
 router.get("/my-project-applicants", requireSignIn, getApplicantsForMyProjects);
 
@@ -92,7 +92,7 @@ router.get("/applicant/:id", requireSignIn, getApplicantDetails);
 router.get("/client-projects/:clientId", getProjectsByClient);
 
 // ADMIN: Get all projects with applicants
-router.get("/admin/all-projects",cacheMiddleware('get-all-job' , 60), getAllProjectsWithApplicantsAdmin);
+router.get("/admin/all-projects",cacheMiddleware(60, 'get-all-job'), getAllProjectsWithApplicantsAdmin);
 
 // ADMIN: Delete a project and all its applicants
 router.delete("/admin/project/:id", deleteProjectAndApplicantsAdmin);

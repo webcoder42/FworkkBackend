@@ -18,7 +18,9 @@ export {
     verifyResetToken,
     resetPassword,
     logoutController,
-    refreshAccessToken
+    refreshAccessToken,
+    getGitHubRepositoryTree,
+    getGitHubFileContent
 } from "./UserController/AuthController.js";
 
 // Import from Profile Controller

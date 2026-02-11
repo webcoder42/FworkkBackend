@@ -1,4 +1,5 @@
 import UserRoute from "./UserRoute.js";
+import GameRoute from "./GameRoute.js";
 import PostProjectRoute from "./PostProjectRoute.js";
 import PlansRoute from "./PlansRoute.js";
 import PlanpurchaseRoute from "./PlanpurchaseRoute.js";
@@ -26,6 +27,7 @@ import DataSetRoute from "./DataSetRoute.js";
 import FworkPrimeRoute from './FworkkPrimeRoute.js'
 import SkillRoute from "./SkillRoute.js";
 import CertificateRoute from "./CertificateRoute.js";
+import NetlifyRoute from "./NetlifyRoute.js";
 
 const setupRoutes = (app) => {
   app.use("/api/v1/users", UserRoute);
@@ -57,6 +59,8 @@ const setupRoutes = (app) => {
   app.use("/api/v1/fworkprime", FworkPrimeRoute);
   app.use("/api/v1/skills", SkillRoute);
   app.use("/api/v1/certificate", CertificateRoute);
+  app.use("/api/v1/game", GameRoute);
+  app.use("/api/v1/netlify", NetlifyRoute);
 };
 
 export default setupRoutes;
