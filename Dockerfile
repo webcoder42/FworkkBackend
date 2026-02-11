@@ -1,6 +1,9 @@
 # Node.js version 20
 FROM node:20-alpine
 
+# Install build dependencies for native modules like node-pty
+RUN apk add --no-cache python3 make g++ linux-headers bash
+
 WORKDIR /app
 
 COPY package*.json ./
