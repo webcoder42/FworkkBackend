@@ -99,6 +99,11 @@ app.use("/live", express.static(generatedRootDir, staticOptions));
 // ROUTES
 setupRoutes(app);
 
+// Loader.io Verification
+app.get("/loaderio-5b6a8b06edd7d2446ce34770e9e95265.txt", (req, res) => {
+  res.send("loaderio-5b6a8b06edd7d2446ce34770e9e95265");
+});
+
 // Health check
 app.get("/health", async (req, res) => {
   const dbState = mongoose.connection.readyState;
