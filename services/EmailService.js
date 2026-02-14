@@ -101,15 +101,38 @@ const getEmailTemplate = (content, previewText = "Notification from Fworkk") => 
   `;
 };
 
-zohoTransporter.verify((error) => {
-  if (error) console.error("❌ Zoho Transporter Error (Auth/Connection):", error.message);
-  else console.log("✅ Zoho Transporter Ready (bizy@bioopay.online)");
-});
+// Verify connections asynchronously to avoid blocking startup
+const verifyTransporters = async () => {
+  try {
+    // Only verify in production or if explicitly requested
+    if (process.env.SKIP_EMAIL_VERIFY === 'true') return;
 
-gmailTransporter.verify((error) => {
-  if (error) console.error("❌ Gmail Transporter Error:", error.message);
-  else console.log("✅ Gmail Transporter Ready (bizy83724@gmail.com)");
-});
+    console.log("📡 Verifying email transporters...");
+    
+    zohoTransporter.verify((error) => {
+      if (error) {
+        console.warn("⚠️ Zoho Transporter (bizy@bioopay.online) connection issues:", error.message);
+        console.info("💡 Tip: This might be due to Render's network restrictions on port 465. Email will fallback to Gmail or Resend.");
+      } else {
+        console.log("✅ Zoho Transporter Ready (bizy@bioopay.online)");
+      }
+    });
+
+    gmailTransporter.verify((error) => {
+      if (error) {
+        console.warn("⚠️ Gmail Transporter connection issues:", error.message);
+        console.info("💡 Tip: Common issue on Render/Vercel. Apps may need 'App Passwords' or use dedicated APIs like Resend.");
+      } else {
+        console.log("✅ Gmail Transporter Ready (bizy83724@gmail.com)");
+      }
+    });
+  } catch (err) {
+    console.error("❌ Email verification error:", err.message);
+  }
+};
+
+// Start verification after a short delay
+setTimeout(verifyTransporters, 5000);
 
 export const sendEmail = async (to, subject, html, text = "", options = {}) => {
   const fromName = process.env.FROM_NAME || "Fworkk Freelancing";

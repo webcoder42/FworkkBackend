@@ -28,9 +28,11 @@ import FworkPrimeRoute from './FworkkPrimeRoute.js'
 import SkillRoute from "./SkillRoute.js";
 import CertificateRoute from "./CertificateRoute.js";
 import NetlifyRoute from "./NetlifyRoute.js";
+import StudioRoute from "./StudioRoute.js";
 
 const setupRoutes = (app) => {
   app.use("/api/v1/users", UserRoute);
+  app.use("/api/v1/studio", StudioRoute);
   app.use("/api/v1/postproject", PostProjectRoute);
   app.use("/api/v1/plans", PlansRoute);
   app.use("/api/v1/planpurchase", PlanpurchaseRoute);

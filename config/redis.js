@@ -25,7 +25,14 @@ const setupDummyRedis = () => {
     };
 };
 
+const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID !== undefined;
+
 if (redisUrl && !(isProduction && isLocalRedis)) {
+    // Basic URL check for production environments
+    if (isProduction && isLocalRedis) {
+        console.warn("⚠️ Warning: Using local Redis URL in production. This will likely fail on Render.");
+    }
+
     redisClient = redis.createClient({
         url: redisUrl,
         socket: {
@@ -34,31 +41,38 @@ if (redisUrl && !(isProduction && isLocalRedis)) {
                     console.error("❌ Redis reconnection abandoned after 3 attempts");
                     return false; // Stop retrying
                 }
-                return Math.min(retries * 100, 3000);
+                const delay = Math.min(retries * 500, 5000);
+                return delay;
             },
-            connectTimeout: 5000,
+            connectTimeout: 10000,
         }
     });
 
     redisClient.on("error", (err) => {
-        console.error("⚠️ Redis Client Error:", err.message);
+        // Only log once to avoid flooding
+        if (redisClient.isOpen) {
+            console.error("⚠️ Redis Client Error:", err.message);
+        }
     });
 
     (async () => {
         try {
             await redisClient.connect();
-            console.log("✅ Redis connected");
+            console.log("✅ Redis connected successfully");
         } catch (err) {
             console.error("❌ Redis connection failed:", err.message);
+            if (isRender && isLocalRedis) {
+                console.info("💡 Tip: On Render, you need to create a Redis service and use its Internal Redis URL.");
+            }
             console.log("⚠️ Falling back to dummy Redis client");
             redisClient = setupDummyRedis();
         }
     })();
 } else {
     if (isProduction && isLocalRedis) {
-        console.log("⚠️ Skipping local Redis URL in production environment.");
+        console.log("⚠️ Skipping local Redis URL in production environment to prevent connection errors.");
     } else if (!redisUrl) {
-        console.log("⚠️ REDIS_URL not provided.");
+        console.log("ℹ️ REDIS_URL not provided. Redis caching is disabled.");
     }
     redisClient = setupDummyRedis();
 }
